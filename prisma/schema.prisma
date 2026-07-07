@@ -1,0 +1,62 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String
+}
+
+model Group {
+  id               String     @id @default(uuid())
+  slug             String     @unique
+  name             String
+  description      String?
+  picture          String?
+  evolutionGroupId String?    // O JID do grupo
+  instanceName     String?    // O nome da instância da Evolution GO
+  members          GroupMember[]
+  schedules        Schedule[]
+  messages         Message[]
+
+  @@unique([instanceName, evolutionGroupId])
+}
+
+model GroupMember {
+  id      String @id @default(uuid())
+  groupId String
+  phone   String
+  role    String @default("participant") // admin, participant
+  group   Group  @relation(fields: [groupId], references: [id])
+}
+
+model Schedule {
+  id                 String   @id @default(uuid())
+  groupId            String
+  type               String   // text, media, button, poll
+  content            String   // JSON string
+  scheduledAt        DateTime // Original requested time
+  adjustedAt         DateTime // Adjusted time for anti-ban
+  status             String   @default("pending") // pending, sent, deactivated
+  evolutionMessageId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  group Group @relation(fields: [groupId], references: [id])
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  groupId   String
+  sender    String
+  content   String   // JSON or text
+  timestamp DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id])
+}
