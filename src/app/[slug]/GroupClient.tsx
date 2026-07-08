@@ -742,7 +742,6 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                          setNewSchedule({...newSchedule, scheduledAt: localISOTime});
                       }
                     }}
-                    initialFocus
                   />
                   <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-3 bg-muted/20">
                     <Label className="text-sm font-semibold w-full text-center text-muted-foreground">Selecione o Horário</Label>
