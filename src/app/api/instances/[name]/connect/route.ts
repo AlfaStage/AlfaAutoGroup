@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ name
 
     const instanceToken = request.headers.get('x-instance-token') || apiKey
 
-    const res = await fetch(`${apiUrl}/instance/qr?instanceName=${name}`, {
+    const res = await fetch(`${apiUrl}/instance/connect/${name}`, {
       method: 'GET',
       headers: {
         'apikey': instanceToken
@@ -25,7 +25,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ name
     })
 
     if (!res.ok) {
-      return NextResponse.json({ error: 'Failed to connect/get QR Code' }, { status: res.status })
+      const errText = await res.text()
+      console.error("Erro Evolution API (connect):", errText)
+      return NextResponse.json({ error: 'Failed to connect/get QR Code', details: errText }, { status: res.status })
     }
 
     const data = await res.json()
