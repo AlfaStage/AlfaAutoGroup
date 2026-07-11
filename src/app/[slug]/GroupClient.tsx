@@ -611,7 +611,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                       <div className="flex flex-wrap items-center gap-2">
                         {isError && (
                           <Button variant="outline" size="sm" onClick={() => handleRetrySchedule(s.id)} className="text-red-500 hover:text-red-600 hover:bg-red-500/10">
-                            Tentar Novamente
+                            Enviar Agora
                           </Button>
                         )}
                         <Button variant="secondary" size="sm" onClick={() => setPreviewSchedule(s)}>

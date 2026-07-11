@@ -8,6 +8,7 @@ services:
       - "3000:3000"
     environment:
       - DATABASE_URL=file:./prisma/dev.db
+      - TZ=America/Sao_Paulo
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
@@ -23,6 +24,7 @@ services:
     command: ["node", "worker.js"]
     environment:
       - DATABASE_URL=file:./prisma/dev.db
+      - TZ=America/Sao_Paulo
       - EVOLUTION_API_URL=${EVOLUTION_API_URL}
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
       - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
