@@ -21,8 +21,10 @@ RUN npm run build
 
 EXPOSE 3000
 
-ENV PORT 3000
 ENV TZ="America/Sao_Paulo"
 
+# Guarda o novo schema fora do volume para não ser sobrescrito
+COPY prisma/schema.prisma /app/schema.prisma.new
+
 # O prisma db push garante que o banco SQLite seja inicializado
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node seed.js && npm start"]
+CMD ["sh", "-c", "cp /app/schema.prisma.new /app/prisma/schema.prisma && npx prisma generate && npx prisma db push --accept-data-loss && node seed.js && npm start"]
