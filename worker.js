@@ -3,7 +3,11 @@ const prisma = new PrismaClient();
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
+let isProcessing = false;
+
 async function processSchedules() {
+  if (isProcessing) return;
+  isProcessing = true;
   try {
     const now = new Date();
     const pendingSchedules = await prisma.schedule.findMany({
@@ -41,6 +45,11 @@ async function processSchedules() {
     }
 
     for (const schedule of pendingSchedules) {
+      await prisma.schedule.update({
+        where: { id: schedule.id },
+        data: { status: 'processing' }
+      });
+
       const evolutionGroupId = schedule.group.evolutionGroupId;
       const instanceName = schedule.group.instanceName;
       if (!evolutionGroupId || !instanceName) continue;
@@ -140,7 +149,8 @@ async function processSchedules() {
           });
           
           if (res.ok) {
-            const data = await res.json();
+            let data = {};
+            try { data = await res.json(); } catch (e) {}
             await prisma.schedule.update({
               where: { id: schedule.id },
               data: {
@@ -150,15 +160,32 @@ async function processSchedules() {
             });
             console.log(`[Worker] Enviado agendamento ${schedule.id} para grupo ${evolutionGroupId}`);
           } else {
-            console.error(`[Worker] Erro ao enviar agendamento ${schedule.id}:`, await res.text());
+            const errText = await res.text();
+            console.error(`[Worker] Erro ao enviar agendamento ${schedule.id}:`, errText);
+            await prisma.schedule.update({
+              where: { id: schedule.id },
+              data: {
+                status: 'error',
+                errorMessage: errText.substring(0, 500)
+              }
+            });
           }
         } catch (apiErr) {
           console.error(`[Worker] Falha na requisição para agendamento ${schedule.id}:`, apiErr);
+          await prisma.schedule.update({
+            where: { id: schedule.id },
+            data: {
+              status: 'error',
+              errorMessage: (apiErr.message || String(apiErr)).substring(0, 500)
+            }
+          });
         }
       }
     }
   } catch (error) {
     console.error('[Worker] Erro ao processar agendamentos:', error);
+  } finally {
+    isProcessing = false;
   }
 }
 

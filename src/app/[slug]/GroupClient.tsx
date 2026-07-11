@@ -409,8 +409,23 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
       if (res.ok) {
         setSchedules(schedules.map((s: any) => s.id === id ? { ...s, status: 'deactivated' } : s))
       }
-    } catch (err) {
-      console.error(err)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const handleRetrySchedule = async (id: string) => {
+    try {
+      const res = await fetch(`/api/schedules/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'pending' })
+      })
+      if (res.ok) {
+        setSchedules(schedules.map((s: any) => s.id === id ? { ...s, status: 'pending', errorMessage: null } : s))
+      }
+    } catch (error) {
+      console.error(error)
     }
   }
   
@@ -564,9 +579,10 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                 const content = JSON.parse(s.content)
                 const isSent = s.status === 'sent'
                 const isDeactivated = s.status === 'deactivated'
+                const isError = s.status === 'error'
                 
                 return (
-                  <Card key={s.id} className={`border-l-4 ${isSent ? 'border-l-green-500 bg-muted/10' : isDeactivated ? 'border-l-muted bg-muted/5' : 'border-l-primary bg-card/40'} border-border/40 transition-all`}>
+                  <Card key={s.id} className={`border-l-4 ${isSent ? 'border-l-green-500 bg-muted/10' : isError ? 'border-l-red-500 bg-red-500/5' : isDeactivated ? 'border-l-muted bg-muted/5' : 'border-l-primary bg-card/40'} border-border/40 transition-all`}>
                     <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
@@ -584,10 +600,20 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                           {s.type === 'poll' && `[Enquete] ${content.name}`}
                         </p>
                         <p className="text-xs text-muted-foreground mt-1 uppercase font-semibold">
-                          Status: <span className={isSent ? 'text-green-500' : isDeactivated ? 'text-muted-foreground' : 'text-primary'}>{s.status}</span>
+                          Status: <span className={isSent ? 'text-green-500' : isError ? 'text-red-500' : isDeactivated ? 'text-muted-foreground' : 'text-primary'}>{s.status}</span>
                         </p>
+                        {isError && s.errorMessage && (
+                          <div className="mt-2 text-xs text-red-500 bg-red-500/10 p-2 rounded-md border border-red-500/20 max-w-full break-words">
+                            <span className="font-bold">Falha:</span> {s.errorMessage}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isError && (
+                          <Button variant="outline" size="sm" onClick={() => handleRetrySchedule(s.id)} className="text-red-500 hover:text-red-600 hover:bg-red-500/10">
+                            Tentar Novamente
+                          </Button>
+                        )}
                         <Button variant="secondary" size="sm" onClick={() => setPreviewSchedule(s)}>
                           <Eye className="w-4 h-4 mr-2" /> Pré-visualizar
                         </Button>

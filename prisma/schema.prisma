@@ -43,7 +43,8 @@ model Schedule {
   content            String   // JSON string
   scheduledAt        DateTime // Original requested time
   adjustedAt         DateTime // Adjusted time for anti-ban
-  status             String   @default("pending") // pending, sent, deactivated
+  status             String   @default("pending") // pending, sent, deactivated, error, processing
+  errorMessage       String?
   evolutionMessageId String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
