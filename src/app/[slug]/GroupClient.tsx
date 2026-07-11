@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { cn } from '@/lib/utils'
-import { ArrowLeft, UserCircle2, Settings, MessageSquare, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3 } from 'lucide-react'
+import { ArrowLeft, UserCircle2, Settings, MessageSquare, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle } from 'lucide-react'
 
 const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
   const [offset, setOffset] = useState(value * 40);
@@ -115,6 +115,13 @@ const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onCh
 
 export default function GroupClient({ initialGroup }: { initialGroup: any }) {
   const [schedules, setSchedules] = useState(initialGroup.schedules || [])
+  
+  // Novos estados para Copiar/Colar
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false)
+  const [selectedForCopy, setSelectedForCopy] = useState<string[]>([])
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
+  const [pasteError, setPasteError] = useState('')
   const [messages, setMessages] = useState(initialGroup.messages || [])
   const [activeTab, setActiveTab] = useState('details')
   const [contacts, setContacts] = useState<any[]>([])
@@ -277,6 +284,121 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     }
   }
 
+  // --- LOGICA DE COPIAR E COLAR AGENDAMENTOS ---
+  const handleOpenCopyModal = () => {
+    setSelectedForCopy([])
+    setIsCopyModalOpen(true)
+  }
+
+  const toggleSelectForCopy = (id: string) => {
+    setSelectedForCopy(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
+  }
+
+  const handleCopySelected = async () => {
+    try {
+      const selectedSchedules = schedules
+        .filter((s: any) => selectedForCopy.includes(s.id))
+        .map((s: any) => ({
+          type: s.type,
+          content: JSON.parse(s.content),
+          scheduledAt: s.scheduledAt
+        }))
+
+      const jsonStr = JSON.stringify(selectedSchedules, null, 2)
+      await navigator.clipboard.writeText(jsonStr)
+      alert("Agendamentos copiados para a área de transferência!")
+      setIsCopyModalOpen(false)
+    } catch (err) {
+      console.error(err)
+      alert("Erro ao copiar. Tente novamente.")
+    }
+  }
+
+  const validatePastedJSON = (text: string) => {
+    try {
+      if (!text.trim()) return "Vazio"
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) return "O JSON deve ser um array."
+      if (parsed.length === 0) return "Array vazio."
+      
+      for (const item of parsed) {
+        if (!item.type || !item.content || !item.scheduledAt) {
+          return "Cada item deve ter type, content e scheduledAt."
+        }
+      }
+      return "" // Sucesso
+    } catch (e) {
+      return "JSON inválido."
+    }
+  }
+
+  const handlePasteClick = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const err = validatePastedJSON(text)
+      if (err) {
+        setPasteText(text)
+        setPasteError(err)
+        setIsPasteModalOpen(true)
+      } else {
+        if (confirm(`Encontrado(s) ${JSON.parse(text).length} agendamento(s) na área de transferência. Deseja colar neste grupo?`)) {
+          await processPaste(JSON.parse(text))
+        }
+      }
+    } catch (err) {
+      setPasteText('')
+      setPasteError("Cole o código JSON aqui")
+      setIsPasteModalOpen(true)
+    }
+  }
+
+  const handlePasteTextChange = (e: any) => {
+    const text = e.target.value
+    setPasteText(text)
+    setPasteError(validatePastedJSON(text))
+  }
+
+  const handlePasteSubmit = async () => {
+    if (pasteError) return
+    try {
+      const parsed = JSON.parse(pasteText)
+      await processPaste(parsed)
+      setIsPasteModalOpen(false)
+    } catch (e) {
+      alert("Erro ao processar")
+    }
+  }
+
+  const processPaste = async (schedulesToPaste: any[]) => {
+    try {
+      let inserted = []
+      for (const sched of schedulesToPaste) {
+        const payload = {
+          groupId: initialGroup.id,
+          type: sched.type,
+          content: sched.content,
+          scheduledAt: sched.scheduledAt,
+          status: 'pending'
+        }
+        const res = await fetch('/api/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        if (res.ok) {
+          inserted.push(await res.json())
+        }
+      }
+      
+      setSchedules([...schedules, ...inserted].sort((a: any, b: any) => new Date(a.adjustedAt).getTime() - new Date(b.adjustedAt).getTime()))
+      alert(`${inserted.length} agendamento(s) colado(s) com sucesso!`)
+    } catch (err) {
+      console.error(err)
+      alert("Erro ao colar agendamentos.")
+    }
+  }
+  // --- FIM DA LÓGICA DE COPIAR E COLAR ---
+
   const handleDeactivate = async (id: string) => {
     try {
       const res = await fetch(`/api/schedules/${id}`, {
@@ -424,9 +546,17 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
           <TabsContent value="schedules" className="space-y-4 animate-in fade-in-50">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Agendamentos</h2>
-              <Button onClick={openNewModal}>
-                <CalendarDays className="w-4 h-4 mr-2" /> Novo Agendamento
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleOpenCopyModal} title="Copiar Agendamentos pendentes">
+                  <Copy className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Copiar</span>
+                </Button>
+                <Button variant="outline" size="sm" onClick={handlePasteClick} title="Colar Agendamentos de outro grupo">
+                  <ClipboardPaste className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Colar</span>
+                </Button>
+                <Button onClick={openNewModal} size="sm">
+                  <CalendarDays className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Novo Agendamento</span>
+                </Button>
+              </div>
             </div>
             
             <div className="space-y-3" ref={scrollRef}>
@@ -857,6 +987,97 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
               )
             })()}
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* Copy Modal */}
+      <Dialog open={isCopyModalOpen} onOpenChange={setIsCopyModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Copiar Agendamentos</DialogTitle>
+            <DialogDescription>
+              Selecione os agendamentos pendentes que deseja copiar para colar em outro grupo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[400px] overflow-y-auto space-y-2 mt-4 pr-2">
+            {schedules.filter((s: any) => s.status === 'pending').map((s: any) => {
+              const content = JSON.parse(s.content)
+              return (
+                <div key={s.id} className="flex items-center space-x-3 border p-3 rounded-md hover:bg-muted/30 transition-colors">
+                  <input 
+                    type="checkbox" 
+                    id={`copy-${s.id}`}
+                    checked={selectedForCopy.includes(s.id)}
+                    onChange={() => toggleSelectForCopy(s.id)}
+                    className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary cursor-pointer"
+                  />
+                  <Label htmlFor={`copy-${s.id}`} className="flex-1 cursor-pointer">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {s.type}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(s.adjustedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium">
+                      {s.type === 'text' && (content.text?.substring(0, 60) + (content.text?.length > 60 ? '...' : ''))}
+                      {s.type === 'media' && `[Mídia] ${content.caption || 'Sem legenda'}`}
+                      {s.type === 'button' && `[Botões] ${content.title}`}
+                      {s.type === 'poll' && `[Enquete] ${content.name}`}
+                    </p>
+                  </Label>
+                </div>
+              )
+            })}
+            {schedules.filter((s: any) => s.status === 'pending').length === 0 && (
+              <p className="text-sm text-center text-muted-foreground py-4 border border-dashed rounded-lg bg-muted/10">Nenhum agendamento pendente para copiar.</p>
+            )}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setIsCopyModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleCopySelected} disabled={selectedForCopy.length === 0}>
+              Copiar Selecionados ({selectedForCopy.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Paste Modal */}
+      <Dialog open={isPasteModalOpen} onOpenChange={setIsPasteModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Colar Agendamentos</DialogTitle>
+            <DialogDescription>
+              Cole o código JSON gerado pelo botão Copiar de outro grupo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <Textarea 
+              value={pasteText}
+              onChange={handlePasteTextChange}
+              placeholder={'[\n  {\n    "type": "text",\n    "content": { ... },\n    "scheduledAt": "2026-..."\n  }\n]'}
+              className="min-h-[200px] font-mono text-xs bg-muted/30"
+            />
+            {pasteError && pasteError !== "Vazio" && pasteError !== "Cole o código JSON aqui" ? (
+              <div className="flex items-center text-red-500 text-sm font-medium">
+                <AlertCircle className="w-4 h-4 mr-2" /> {pasteError}
+              </div>
+            ) : pasteError === "Cole o código JSON aqui" || pasteError === "Vazio" ? (
+               <div className="flex items-center text-muted-foreground text-sm">
+                 <AlertCircle className="w-4 h-4 mr-2" /> Aguardando código JSON...
+               </div>
+            ) : pasteText && !pasteError ? (
+              <div className="flex items-center text-green-500 text-sm font-medium">
+                <CheckCircle2 className="w-4 h-4 mr-2" /> JSON Válido! Estrutura correta detectada.
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setIsPasteModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handlePasteSubmit} disabled={!!pasteError}>
+              Confirmar e Colar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
