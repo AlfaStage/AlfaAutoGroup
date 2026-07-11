@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { cn } from '@/lib/utils'
-import { ArrowLeft, UserCircle2, Settings, MessageSquare, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle } from 'lucide-react'
+import { ArrowLeft, UserCircle2, Settings, MessageSquare, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
 
 const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
   const [offset, setOffset] = useState(value * 40);
@@ -414,15 +414,16 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     }
   }
 
-  const handleRetrySchedule = async (id: string) => {
+  const handleSendNow = async (id: string) => {
     try {
+      const now = new Date();
       const res = await fetch(`/api/schedules/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'pending' })
+        body: JSON.stringify({ status: 'pending', scheduledAt: now.toISOString() })
       })
       if (res.ok) {
-        setSchedules(schedules.map((s: any) => s.id === id ? { ...s, status: 'pending', errorMessage: null } : s))
+        setSchedules(schedules.map((s: any) => s.id === id ? { ...s, status: 'pending', errorMessage: null, scheduledAt: now.toISOString(), adjustedAt: now.toISOString() } : s))
       }
     } catch (error) {
       console.error(error)
@@ -609,9 +610,9 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                         )}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        {isError && (
-                          <Button variant="outline" size="sm" onClick={() => handleRetrySchedule(s.id)} className="text-red-500 hover:text-red-600 hover:bg-red-500/10">
-                            Enviar Agora
+                        {(isError || s.status === 'pending') && (
+                          <Button variant="outline" size="sm" onClick={() => handleSendNow(s.id)} className="text-primary hover:text-primary hover:bg-primary/10">
+                            <Send className="w-4 h-4 mr-2" /> Enviar Agora
                           </Button>
                         )}
                         <Button variant="secondary" size="sm" onClick={() => setPreviewSchedule(s)}>
