@@ -42,10 +42,10 @@ import { isAuthenticated } from '@/lib/auth'
  *                 type: string
  *               instanceName:
  *                 type: string
- *                 description: Nome da instância conectada.
+ *                 description: "Nome da instância conectada."
  *               participants:
  *                 type: string
- *                 description: Lista de números separados por vírgula (ex: 5511999999999).
+ *                 description: "Lista de números separados por vírgula (ex: 5511999999999)."
  *     responses:
  *       200:
  *         description: Grupo criado com sucesso.

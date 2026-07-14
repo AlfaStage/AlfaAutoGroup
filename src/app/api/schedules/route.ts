@@ -49,7 +49,7 @@ import { isAuthenticated } from '@/lib/auth'
  *                 enum: [text, media, button, poll]
  *               content:
  *                 type: object
- *                 description: O conteúdo da mensagem em JSON. Exemplo para texto { text: "Olá" }.
+ *                 description: "O conteúdo da mensagem em JSON. Exemplo para texto { text: 'Olá' }."
  *               scheduledAt:
  *                 type: string
  *                 format: date-time
