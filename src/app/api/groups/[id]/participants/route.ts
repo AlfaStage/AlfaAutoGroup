@@ -1,11 +1,35 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/groups/{id}/participants:
+ *   get:
+ *     summary: Lista os participantes do grupo
+ *     description: Consulta a Evolution API em tempo real para trazer os participantes atuais do grupo.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do grupo no banco de dados local.
+ *     responses:
+ *       200:
+ *         description: Lista de participantes retornada com sucesso.
+ *       401:
+ *         description: Não autorizado.
+ *       404:
+ *         description: Grupo ou instância não encontrados.
+ *       500:
+ *         description: Falha na API.
+ */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await params
 

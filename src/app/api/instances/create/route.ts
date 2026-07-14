@@ -1,10 +1,46 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/instances/create:
+ *   post:
+ *     summary: Cria uma nova instância
+ *     description: Cria uma nova instância de WhatsApp na Evolution API.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - instanceName
+ *             properties:
+ *               instanceName:
+ *                 type: string
+ *               proxyHost:
+ *                 type: string
+ *               proxyPort:
+ *                 type: integer
+ *               proxyProtocol:
+ *                 type: string
+ *               proxyUsername:
+ *                 type: string
+ *               proxyPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Instância criada com sucesso.
+ *       401:
+ *         description: Não autorizado.
+ *       500:
+ *         description: Erro ao criar instância.
+ */
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const apiUrl = process.env.EVOLUTION_API_URL
     const apiKey = process.env.EVOLUTION_API_KEY

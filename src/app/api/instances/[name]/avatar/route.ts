@@ -1,10 +1,40 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/instances/{name}/avatar:
+ *   get:
+ *     summary: Obtém a foto de perfil de um contato
+ *     description: Retorna a URL da foto de perfil de um contato (JID) no WhatsApp. Redireciona para a URL.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Nome da instância
+ *       - in: query
+ *         name: jid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: O número ou JID do contato
+ *     responses:
+ *       307:
+ *         description: Redireciona para a imagem
+ *       400:
+ *         description: JID não informado
+ *       404:
+ *         description: Avatar não encontrado
+ *       401:
+ *         description: Não autorizado
+ */
 export async function GET(request: Request, { params }: { params: Promise<{ name: string }> }) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { name } = await params
     const { searchParams } = new URL(request.url)

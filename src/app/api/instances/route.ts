@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
 /**
  * @swagger
@@ -14,20 +14,12 @@ import { getServerSession } from "next-auth/next"
  *         description: Lista de instâncias.
  *       401:
  *         description: Não autorizado (Sessão inválida ou Bearer token incorreto).
+ *       500:
+ *         description: Erro interno.
  */
 export async function GET(request: Request) {
   try {
-    const aiToken = request.headers.get('authorization')?.replace('Bearer ', '');
-    let isAuthenticated = false;
-    
-    if (aiToken && aiToken === process.env.AI_API_KEY) {
-      isAuthenticated = true;
-    } else {
-      const session = await getServerSession()
-      if (session) isAuthenticated = true;
-    }
-
-    if (!isAuthenticated) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const apiUrl = process.env.EVOLUTION_API_URL
     const apiKey = process.env.EVOLUTION_API_KEY

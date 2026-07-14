@@ -1,10 +1,32 @@
 import { NextResponse } from 'next/server'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/instances/{name}/status:
+ *   get:
+ *     summary: Obtém o status da conexão da instância
+ *     description: Retorna o status atual da instância (ex. open, close, connecting).
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Nome da instância
+ *     responses:
+ *       200:
+ *         description: Status da instância retornado com sucesso.
+ *       401:
+ *         description: Não autorizado.
+ *       500:
+ *         description: Falha ao obter status.
+ */
 export async function GET(request: Request, { params }: { params: Promise<{ name: string }> }) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { name } = await params
     const apiUrl = process.env.EVOLUTION_API_URL

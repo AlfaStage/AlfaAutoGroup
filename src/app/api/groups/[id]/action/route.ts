@@ -1,11 +1,53 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getServerSession } from "next-auth/next"
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/groups/{id}/action:
+ *   post:
+ *     summary: Executa uma ação de gerenciamento no grupo
+ *     description: Permite alterar o nome, descrição ou foto do grupo no WhatsApp.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do grupo no banco de dados local.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - action
+ *               - value
+ *             properties:
+ *               action:
+ *                 type: string
+ *                 enum: [name, description, picture]
+ *               value:
+ *                 type: string
+ *                 description: O novo valor (texto ou base64 da imagem)
+ *     responses:
+ *       200:
+ *         description: Ação executada com sucesso.
+ *       400:
+ *         description: Dados inválidos.
+ *       401:
+ *         description: Não autorizado.
+ *       404:
+ *         description: Grupo não encontrado.
+ *       500:
+ *         description: Falha ao executar ação.
+ */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await params
     const { action, value } = await request.json()

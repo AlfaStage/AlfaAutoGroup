@@ -1,11 +1,64 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getServerSession } from 'next-auth'
+import { isAuthenticated } from '@/lib/auth'
 
+/**
+ * @swagger
+ * /api/schedules/{id}:
+ *   patch:
+ *     summary: Edita um agendamento existente
+ *     description: Permite alterar status, tipo, conteúdo ou horário de um agendamento. O antiban ajustará o novo horário caso haja conflito.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do agendamento
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *               content:
+ *                 type: object
+ *               scheduledAt:
+ *                 type: string
+ *                 format: date-time
+ *     responses:
+ *       200:
+ *         description: Agendamento atualizado.
+ *       401:
+ *         description: Não autorizado.
+ *   delete:
+ *     summary: Exclui um agendamento existente
+ *     description: Remove o agendamento do banco de dados (cancela o disparo se ainda não tiver ocorrido).
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do agendamento
+ *     responses:
+ *       200:
+ *         description: Agendamento excluído.
+ *       401:
+ *         description: Não autorizado.
+ */
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const session = await getServerSession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const data = await request.json()
     const { id } = await params
@@ -53,5 +106,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   } catch (error) {
     console.error("Erro ao atualizar agendamento:", error)
     return NextResponse.json({ error: 'Falha ao atualizar' }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { id } = await params
+    
+    await prisma.schedule.delete({
+      where: { id }
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error("Erro ao deletar agendamento:", error)
+    return NextResponse.json({ error: 'Falha ao excluir' }, { status: 500 })
   }
 }

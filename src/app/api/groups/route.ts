@@ -1,23 +1,22 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getServerSession } from "next-auth/next"
-
-async function isAuthenticated(request: Request) {
-  const aiToken = request.headers.get('authorization')?.replace('Bearer ', '');
-  if (aiToken && aiToken === process.env.AI_API_KEY) return true;
-  const session = await getServerSession();
-  if (session) return true;
-  return false;
-}
+import { isAuthenticated } from '@/lib/auth'
 
 /**
  * @swagger
  * /api/groups:
  *   get:
  *     summary: Lista todos os grupos cadastrados localmente
- *     description: Retorna os grupos do banco de dados junto da contagem de membros e agendamentos.
+ *     description: Retorna os grupos do banco de dados junto da contagem de membros e agendamentos. Pode ser filtrado por instância.
  *     security:
  *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: instanceName
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Filtra os grupos que pertencem a uma instância específica.
  *     responses:
  *       200:
  *         description: Lista de grupos.
@@ -56,7 +55,13 @@ async function isAuthenticated(request: Request) {
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
+    const { searchParams } = new URL(request.url)
+    const instanceName = searchParams.get('instanceName')
+    
+    const whereClause = instanceName ? { instanceName } : {}
+
     const groups = await prisma.group.findMany({
+      where: whereClause,
       include: {
         _count: {
           select: { members: true, schedules: true }

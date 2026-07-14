@@ -1,17 +1,45 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
+import { isAuthenticated } from '@/lib/auth';
 
 const prisma = new PrismaClient();
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
+/**
+ * @swagger
+ * /api/instances/{name}/sync-groups:
+ *   post:
+ *     summary: Sincroniza os grupos da instância
+ *     description: Busca os grupos no WhatsApp e atualiza no banco de dados local.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: name
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Nome da instância
+ *     responses:
+ *       200:
+ *         description: Grupos sincronizados com sucesso.
+ *       400:
+ *         description: Token ausente.
+ *       401:
+ *         description: Não autorizado.
+ *       500:
+ *         description: Falha ao sincronizar.
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
+    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const { name: instanceName } = await params;
-    const token = request.headers.get('x-instance-token');
+    const token = request.headers.get('x-instance-token') || EVOLUTION_API_KEY;
 
     if (!token || !EVOLUTION_API_URL) {
       return NextResponse.json({ error: 'Missing token or API URL' }, { status: 400 });
