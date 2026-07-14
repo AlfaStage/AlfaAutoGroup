@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(bytes);
 
     // Ensure uploads directory exists
-    const uploadsDir = join(process.cwd(), 'public', 'uploads');
+    const uploadsDir = join(process.cwd(), 'uploads');
     try {
       await mkdir(uploadsDir, { recursive: true });
     } catch (e) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       baseUrl = `${protocol}://${request.headers.get('host')}`;
     }
 
-    const fileUrl = `${baseUrl}/uploads/${filename}`;
+    const fileUrl = `${baseUrl}/api/uploads/${filename}`;
 
     return NextResponse.json({ success: true, url: fileUrl, filename });
   } catch (error) {

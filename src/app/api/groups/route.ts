@@ -1,7 +1,60 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getServerSession } from "next-auth/next"
 
-export async function GET() {
+async function isAuthenticated(request: Request) {
+  const aiToken = request.headers.get('authorization')?.replace('Bearer ', '');
+  if (aiToken && aiToken === process.env.AI_API_KEY) return true;
+  const session = await getServerSession();
+  if (session) return true;
+  return false;
+}
+
+/**
+ * @swagger
+ * /api/groups:
+ *   get:
+ *     summary: Lista todos os grupos cadastrados localmente
+ *     description: Retorna os grupos do banco de dados junto da contagem de membros e agendamentos.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de grupos.
+ *       401:
+ *         description: Não autorizado.
+ *   post:
+ *     summary: Cria um novo grupo
+ *     description: Cria o grupo na Evolution API e salva o registro localmente.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               slug:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               instanceName:
+ *                 type: string
+ *                 description: Nome da instância conectada.
+ *               participants:
+ *                 type: string
+ *                 description: Lista de números separados por vírgula (ex: 5511999999999).
+ *     responses:
+ *       200:
+ *         description: Grupo criado com sucesso.
+ *       401:
+ *         description: Não autorizado.
+ */
+export async function GET(request: Request) {
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const groups = await prisma.group.findMany({
       include: {
@@ -18,6 +71,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const data = await request.json()
     const { name, slug, description, picture, participants, instanceName } = data

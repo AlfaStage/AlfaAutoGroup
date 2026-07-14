@@ -1,7 +1,68 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getServerSession } from "next-auth/next"
 
+async function isAuthenticated(request: Request) {
+  const aiToken = request.headers.get('authorization')?.replace('Bearer ', '');
+  if (aiToken && aiToken === process.env.AI_API_KEY) return true;
+  const session = await getServerSession();
+  if (session) return true;
+  return false;
+}
+
+/**
+ * @swagger
+ * /api/schedules:
+ *   get:
+ *     summary: Lista agendamentos de um grupo
+ *     description: Retorna os agendamentos pendentes ou processados de um grupo específico.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID do grupo local.
+ *     responses:
+ *       200:
+ *         description: Lista de agendamentos.
+ *       400:
+ *         description: Group ID ausente.
+ *       401:
+ *         description: Não autorizado.
+ *   post:
+ *     summary: Cria um novo agendamento de mensagem
+ *     description: Agenda uma mensagem para ser enviada a um grupo em uma data/hora específica.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               groupId:
+ *                 type: string
+ *               type:
+ *                 type: string
+ *                 enum: [text, media, button, poll]
+ *               content:
+ *                 type: object
+ *                 description: O conteúdo da mensagem em JSON. Exemplo para texto { text: "Olá" }.
+ *               scheduledAt:
+ *                 type: string
+ *                 format: date-time
+ *     responses:
+ *       200:
+ *         description: Agendamento criado com sucesso.
+ *       401:
+ *         description: Não autorizado.
+ */
 export async function POST(request: Request) {
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const data = await request.json()
     const { groupId, type, content, scheduledAt } = data
@@ -48,6 +109,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(request.url)
   const groupId = searchParams.get('groupId')
 

@@ -15,6 +15,7 @@ services:
       - NEXTAUTH_URL=${NEXTAUTH_URL}
     volumes:
       - sqlite_data:/app/prisma
+      - uploads_data:/app/uploads
     restart: unless-stopped
 
   worker:
@@ -31,9 +32,11 @@ services:
       - NEXTAUTH_URL=${NEXTAUTH_URL}
     volumes:
       - sqlite_data:/app/prisma
+      - uploads_data:/app/uploads
     restart: unless-stopped
     depends_on:
       - web
 
 volumes:
   sqlite_data:
+  uploads_data:
