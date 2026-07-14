@@ -145,6 +145,8 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [previewSchedule, setPreviewSchedule] = useState<any>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   
   // Form State
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -732,17 +734,30 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                     <input type="file" id="mediaUpload" className="hidden" onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if(!file) return;
+                      
+                      setIsUploading(true);
+                      setUploadError('');
+                      
                       const fd = new FormData(); fd.append('file', file);
                       try {
                         const res = await fetch('/api/upload', {method:'POST', body:fd});
                         const data = await res.json();
-                        if(data.success) setNewSchedule({...newSchedule, mediaUrl: data.url});
-                      } catch(e){}
+                        if (res.ok && data.success) {
+                          setNewSchedule({...newSchedule, mediaUrl: data.url});
+                        } else {
+                          setUploadError(data.error || 'Erro interno no servidor ao realizar upload.');
+                        }
+                      } catch(err: any) {
+                        setUploadError(err.message || 'Erro na conexão de upload');
+                      } finally {
+                        setIsUploading(false);
+                      }
                     }}/>
-                    <Button type="button" variant="secondary" onClick={() => document.getElementById('mediaUpload')?.click()}>
-                      <Upload className="w-4 h-4" />
+                    <Button type="button" variant="secondary" onClick={() => document.getElementById('mediaUpload')?.click()} disabled={isUploading}>
+                      {isUploading ? <span className="text-xs">⏳</span> : <Upload className="w-4 h-4" />}
                     </Button>
                   </div>
+                  {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
                 </div>
 
                 <div className="space-y-2">

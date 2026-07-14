@@ -44,6 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, url: fileUrl, filename });
   } catch (error) {
     console.error('Error handling upload:', error);
-    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    const msg = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
