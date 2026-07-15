@@ -18,10 +18,9 @@ import { isAuthenticated } from '@/lib/auth'
  *         description: Erro interno.
  */
 export async function GET(request: Request) {
-  try {
-    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Não autorizado', debug: process.env.AI_API_KEY }, { status: 401 })
 
-    const apiUrl = process.env.EVOLUTION_API_URL
+  try { const apiUrl = process.env.EVOLUTION_API_URL
     const apiKey = process.env.EVOLUTION_API_KEY
 
     if (!apiUrl || !apiKey) {
