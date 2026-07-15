@@ -17,6 +17,9 @@ RUN npx prisma generate
 # Define DATABASE_URL for build time to prevent Prisma from crashing
 ENV DATABASE_URL="file:./prisma/dev.db"
 
+ARG AI_API_KEY
+ENV AI_API_KEY=${AI_API_KEY}
+
 RUN npm run build
 
 EXPOSE 3000
