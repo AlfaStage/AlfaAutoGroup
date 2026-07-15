@@ -17,6 +17,8 @@ import { isAuthenticated } from '@/lib/auth'
  *       500:
  *         description: Erro interno.
  */
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Não autorizado', debug: process.env.AI_API_KEY }, { status: 401 })
 
