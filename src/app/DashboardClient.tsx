@@ -136,11 +136,13 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [massPasteError, setMassPasteError] = useState('')
   const [selectedGroupsForPaste, setSelectedGroupsForPaste] = useState<string[]>([])
   const [isPasting, setIsPasting] = useState(false)
+  const [searchTermPaste, setSearchTermPaste] = useState('')
 
   // Mass Create State
   const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
   const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
   const [isCreating, setIsCreating] = useState(false)
+  const [searchTermCreate, setSearchTermCreate] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   
@@ -496,6 +498,9 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const filteredGroups = selectedInstance 
     ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name)) 
     : []
+    
+  const filteredGroupsForPaste = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermPaste.toLowerCase()))
+  const filteredGroupsForCreate = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermCreate.toLowerCase()))
   const totalGroups = filteredGroups.length
   const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
   const totalSchedules = filteredGroups.reduce((acc, g) => acc + (g._count?.schedules || 0), 0)
@@ -701,24 +706,32 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </div>
             
             <div className="space-y-2">
+              <Label>Buscar Grupo</Label>
+              <Input placeholder="Filtrar por nome..." value={searchTermPaste} onChange={e => setSearchTermPaste(e.target.value)} />
+            </div>
+            
+            <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between">
                 <Label>Selecione os Grupos Destino</Label>
                 <Button variant="ghost" size="sm" onClick={() => {
-                  if (selectedGroupsForPaste.length === filteredGroups.length) {
-                    setSelectedGroupsForPaste([])
+                  const currentIds = filteredGroupsForPaste.map(g => g.id);
+                  const allSelected = currentIds.length > 0 && currentIds.every(id => selectedGroupsForPaste.includes(id));
+                  if (allSelected) {
+                    setSelectedGroupsForPaste(selectedGroupsForPaste.filter(id => !currentIds.includes(id)))
                   } else {
-                    setSelectedGroupsForPaste(filteredGroups.map(g => g.id))
+                    const newSelection = new Set([...selectedGroupsForPaste, ...currentIds]);
+                    setSelectedGroupsForPaste(Array.from(newSelection))
                   }
                 }}>
-                  {selectedGroupsForPaste.length === filteredGroups.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                  {filteredGroupsForPaste.length > 0 && filteredGroupsForPaste.every(g => selectedGroupsForPaste.includes(g.id)) ? 'Desmarcar Listados' : 'Selecionar Listados'}
                 </Button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
-                {filteredGroups.map(g => (
-                  <label key={g.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
+              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
+                {filteredGroupsForPaste.map(g => (
+                  <label key={g.id} className="flex items-start space-x-3 p-3 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
                     <input 
                       type="checkbox" 
-                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      className="rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
                       checked={selectedGroupsForPaste.includes(g.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -728,10 +741,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                         }
                       }}
                     />
-                    <span className="text-sm font-medium truncate flex-1">{g.name}</span>
+                    <span className="text-sm font-medium whitespace-normal break-words leading-tight flex-1">{g.name}</span>
                   </label>
                 ))}
-                {filteredGroups.length === 0 && (
+                {filteredGroupsForPaste.length === 0 && (
                   <div className="col-span-full text-center text-xs text-muted-foreground p-4">
                     Nenhum grupo encontrado nesta instância.
                   </div>
@@ -1048,24 +1061,30 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </Button>
 
             <div className="space-y-2 pt-4 border-t border-border/50">
-              <div className="flex items-center justify-between">
+              <Label>Buscar Grupo</Label>
+              <Input placeholder="Filtrar por nome..." value={searchTermCreate} onChange={e => setSearchTermCreate(e.target.value)} />
+              
+              <div className="flex items-center justify-between pt-2">
                 <Label>Selecione os Grupos Destino</Label>
                 <Button type="button" variant="ghost" size="sm" onClick={() => {
-                  if (selectedGroupsForCreate.length === filteredGroups.length) {
-                    setSelectedGroupsForCreate([])
+                  const currentIds = filteredGroupsForCreate.map(g => g.id);
+                  const allSelected = currentIds.length > 0 && currentIds.every(id => selectedGroupsForCreate.includes(id));
+                  if (allSelected) {
+                    setSelectedGroupsForCreate(selectedGroupsForCreate.filter(id => !currentIds.includes(id)))
                   } else {
-                    setSelectedGroupsForCreate(filteredGroups.map(g => g.id))
+                    const newSelection = new Set([...selectedGroupsForCreate, ...currentIds]);
+                    setSelectedGroupsForCreate(Array.from(newSelection))
                   }
                 }}>
-                  {selectedGroupsForCreate.length === filteredGroups.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                  {filteredGroupsForCreate.length > 0 && filteredGroupsForCreate.every(g => selectedGroupsForCreate.includes(g.id)) ? 'Desmarcar Listados' : 'Selecionar Listados'}
                 </Button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[200px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
-                {filteredGroups.map(g => (
-                  <label key={g.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
+              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
+                {filteredGroupsForCreate.map(g => (
+                  <label key={g.id} className="flex items-start space-x-3 p-3 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
                     <input 
                       type="checkbox" 
-                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      className="rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
                       checked={selectedGroupsForCreate.includes(g.id)}
                       onChange={(e) => {
                         if (e.target.checked) {
@@ -1075,10 +1094,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                         }
                       }}
                     />
-                    <span className="text-sm font-medium truncate flex-1">{g.name}</span>
+                    <span className="text-sm font-medium whitespace-normal break-words leading-tight flex-1">{g.name}</span>
                   </label>
                 ))}
-                {filteredGroups.length === 0 && (
+                {filteredGroupsForCreate.length === 0 && (
                   <div className="col-span-full text-center text-xs text-muted-foreground p-4">
                     Nenhum grupo encontrado nesta instância.
                   </div>
