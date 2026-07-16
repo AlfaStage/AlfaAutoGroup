@@ -842,7 +842,33 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                 )}
 
                 {schedule.type === 'media' && (
-                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                  <div 
+                    className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10 transition-colors"
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('bg-primary/10', 'border-primary') }}
+                    onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('bg-primary/10', 'border-primary') }}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      e.currentTarget.classList.remove('bg-primary/10', 'border-primary');
+                      const file = e.dataTransfer.files?.[0];
+                      if(!file) return;
+                      setIsUploading(true);
+                      setUploadError('');
+                      const fd = new FormData(); fd.append('file', file);
+                      try {
+                        const res = await fetch('/api/upload', {method:'POST', body:fd});
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          updateSchedule(index, { mediaUrl: data.url });
+                        } else {
+                          setUploadError(data.error || 'Erro no servidor ao realizar upload.');
+                        }
+                      } catch(err: any) {
+                        setUploadError(err.message || 'Erro na conexão.');
+                      } finally {
+                        setIsUploading(false);
+                      }
+                    }}
+                  >
                     <div className="space-y-2">
                       <Label>Tipo de Mídia</Label>
                       <Select value={schedule.mediatype} onValueChange={v => updateSchedule(index, { mediatype: v })}>
