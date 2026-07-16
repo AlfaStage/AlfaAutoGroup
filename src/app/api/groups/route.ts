@@ -65,6 +65,9 @@ export async function GET(request: Request) {
       include: {
         _count: {
           select: { members: true, schedules: true }
+        },
+        schedules: {
+          select: { status: true }
         }
       }
     })

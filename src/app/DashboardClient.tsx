@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff } from 'lucide-react'
+import { Textarea } from '@/components/ui/textarea'
 
 export default function DashboardClient({ initialGroups }: { initialGroups: any[] }) {
   const [groups, setGroups] = useState(initialGroups)
@@ -26,6 +27,13 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [isInstanceModalOpen, setIsInstanceModalOpen] = useState(false)
   const [newInstance, setNewInstance] = useState({ instanceName: '', proxyHost: '', proxyPort: '', proxyProtocol: 'http', proxyUsername: '', proxyPassword: '' })
   const [newGroup, setNewGroup] = useState({ name: '', slug: '', description: '', participants: '', instanceName: '' })
+
+  // Mass Paste State
+  const [isMassPasteModalOpen, setIsMassPasteModalOpen] = useState(false)
+  const [massPasteText, setMassPasteText] = useState('')
+  const [massPasteError, setMassPasteError] = useState('')
+  const [selectedGroupsForPaste, setSelectedGroupsForPaste] = useState<string[]>([])
+  const [isPasting, setIsPasting] = useState(false)
 
   // Fetch instances on mount
   useEffect(() => {
@@ -194,6 +202,75 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
   }
 
+  const validatePastedJSON = (text: string) => {
+    try {
+      if (!text.trim()) return "Vazio"
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) return "O JSON deve ser um array."
+      if (parsed.length === 0) return "Array vazio."
+      
+      for (const item of parsed) {
+        if (!item.type || !item.content || !item.scheduledAt) {
+          return "Cada item deve ter type, content e scheduledAt."
+        }
+      }
+      return "" // Sucesso
+    } catch (e) {
+      return "JSON inválido."
+    }
+  }
+
+  const handleMassPasteClick = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const err = validatePastedJSON(text)
+      setMassPasteText(text)
+      setMassPasteError(err || "")
+      setSelectedGroupsForPaste([])
+      setIsMassPasteModalOpen(true)
+    } catch (err) {
+      setMassPasteText('')
+      setMassPasteError("Cole o código JSON aqui")
+      setSelectedGroupsForPaste([])
+      setIsMassPasteModalOpen(true)
+    }
+  }
+
+  const handleMassPasteSubmit = async () => {
+    if (massPasteError || selectedGroupsForPaste.length === 0) return
+    setIsPasting(true)
+    try {
+      const schedulesToPaste = JSON.parse(massPasteText)
+      let insertedCount = 0
+      
+      for (const sched of schedulesToPaste) {
+        const payload = {
+          groupIds: selectedGroupsForPaste,
+          type: sched.type,
+          content: sched.content,
+          scheduledAt: sched.scheduledAt,
+          status: 'pending'
+        }
+        const res = await fetch('/api/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        if (res.ok) {
+          insertedCount++
+        }
+      }
+      
+      alert(`${insertedCount} agendamento(s) colado(s) com sucesso em ${selectedGroupsForPaste.length} grupo(s)!`)
+      setIsMassPasteModalOpen(false)
+      window.location.reload()
+    } catch (e) {
+      alert("Erro ao colar agendamentos.")
+    } finally {
+      setIsPasting(false)
+    }
+  }
+
   const filteredGroups = selectedInstance ? groups.filter(g => g.instanceName === selectedInstance) : []
   const totalGroups = filteredGroups.length
   const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
@@ -287,6 +364,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <h2 className="text-2xl font-bold tracking-tight">Meus Grupos</h2>
           <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Button variant="outline" onClick={handleMassPasteClick} className="flex-1 sm:flex-none text-primary border-primary hover:bg-primary/10">
+              <ClipboardPaste className="w-4 h-4 mr-2" />
+              Colar em Massa
+            </Button>
             <Button variant="secondary" onClick={handleSyncGroups} className="flex-1 sm:flex-none">
               <RefreshCcw className="w-4 h-4 mr-2" />
               Sincronizar
@@ -316,7 +397,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center gap-4 text-xs font-medium text-muted-foreground bg-muted/30 p-2 rounded-md">
+                  <div className="flex items-center gap-4 text-xs font-medium text-muted-foreground bg-muted/30 p-2 rounded-md mb-2">
                     <div className="flex items-center gap-1.5">
                       <Users className="w-3.5 h-3.5" />
                       {g._count.members}
@@ -325,6 +406,33 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                       <CalendarDays className="w-3.5 h-3.5" />
                       {g._count.schedules}
                     </div>
+                  </div>
+                  
+                  {/* Status Badges */}
+                  <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold">
+                    {(() => {
+                      const sent = g.schedules?.filter((s: any) => s.status === 'sent').length || 0;
+                      const pending = g.schedules?.filter((s: any) => s.status === 'pending').length || 0;
+                      const error = g.schedules?.filter((s: any) => s.status === 'error').length || 0;
+                      const deactivated = g.schedules?.filter((s: any) => s.status === 'deactivated').length || 0;
+                      
+                      return (
+                        <>
+                          <div className="bg-green-500/10 text-green-500 rounded p-1 flex flex-col items-center justify-center border border-green-500/20" title="Enviadas">
+                            <CheckCircle2 className="w-3.5 h-3.5 mb-0.5" /> {sent}
+                          </div>
+                          <div className="bg-primary/10 text-primary rounded p-1 flex flex-col items-center justify-center border border-primary/20" title="Pendentes">
+                            <Clock className="w-3.5 h-3.5 mb-0.5" /> {pending}
+                          </div>
+                          <div className="bg-red-500/10 text-red-500 rounded p-1 flex flex-col items-center justify-center border border-red-500/20" title="Falhas">
+                            <AlertCircle className="w-3.5 h-3.5 mb-0.5" /> {error}
+                          </div>
+                          <div className="bg-muted text-muted-foreground rounded p-1 flex flex-col items-center justify-center border border-border" title="Desativadas">
+                            <PowerOff className="w-3.5 h-3.5 mb-0.5" /> {deactivated}
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
                 </CardContent>
               </Card>
@@ -338,6 +446,84 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           )}
         </div>
       </div>
+
+      {/* Mass Paste Dialog */}
+      <Dialog open={isMassPasteModalOpen} onOpenChange={setIsMassPasteModalOpen}>
+        <DialogContent className="sm:max-w-[600px] w-[95vw] max-h-[90vh] overflow-y-auto rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Colar Agendamentos em Massa</DialogTitle>
+            <DialogDescription>
+              Cole o JSON copiado de outro grupo e selecione os grupos de destino.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>JSON dos Agendamentos</Label>
+              <Textarea 
+                value={massPasteText} 
+                onChange={e => {
+                  setMassPasteText(e.target.value)
+                  setMassPasteError(validatePastedJSON(e.target.value))
+                }} 
+                rows={4} 
+                className={massPasteError ? "border-red-500" : ""}
+                placeholder="[{...}]"
+              />
+              {massPasteError && <p className="text-xs text-red-500 font-medium">{massPasteError}</p>}
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Selecione os Grupos Destino</Label>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  if (selectedGroupsForPaste.length === filteredGroups.length) {
+                    setSelectedGroupsForPaste([])
+                  } else {
+                    setSelectedGroupsForPaste(filteredGroups.map(g => g.id))
+                  }
+                }}>
+                  {selectedGroupsForPaste.length === filteredGroups.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
+                {filteredGroups.map(g => (
+                  <label key={g.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      checked={selectedGroupsForPaste.includes(g.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedGroupsForPaste([...selectedGroupsForPaste, g.id])
+                        } else {
+                          setSelectedGroupsForPaste(selectedGroupsForPaste.filter(id => id !== g.id))
+                        }
+                      }}
+                    />
+                    <span className="text-sm font-medium truncate flex-1">{g.name}</span>
+                  </label>
+                ))}
+                {filteredGroups.length === 0 && (
+                  <div className="col-span-full text-center text-xs text-muted-foreground p-4">
+                    Nenhum grupo encontrado nesta instância.
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
+              <Button variant="secondary" onClick={() => setIsMassPasteModalOpen(false)} className="w-full sm:w-auto" disabled={isPasting}>Cancelar</Button>
+              <Button 
+                onClick={handleMassPasteSubmit} 
+                className="w-full sm:w-auto" 
+                disabled={!!massPasteError || selectedGroupsForPaste.length === 0 || isPasting}
+              >
+                {isPasting ? 'Agendando...' : `Agendar em ${selectedGroupsForPaste.length} grupo(s)`}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Group Dialog */}
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>

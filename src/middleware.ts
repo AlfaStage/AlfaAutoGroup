@@ -6,7 +6,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/login', '/api/auth', '/api/webhook']
+  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/uploads']
   const isPublic = publicRoutes.some(route => pathname.startsWith(route))
   
   // Static assets and internal next routes
