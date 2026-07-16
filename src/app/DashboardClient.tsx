@@ -410,6 +410,42 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     setIsMassCreateModalOpen(true)
   }
 
+  const handlePasteIntoCreate = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text) return
+      const parsed = JSON.parse(text)
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      
+      const newItems = arr.map(item => {
+        return {
+          type: item.type || 'text',
+          text: item.type === 'text' ? item.content?.text || '' : '',
+          mediaUrl: (item.type === 'media' || item.type === 'button') ? (item.content?.media || item.content?.imageUrl || item.content?.videoUrl || '') : '',
+          mediatype: item.type === 'media' ? (item.content?.mediatype || 'image') : (item.content?.videoUrl ? 'video' : 'image'),
+          caption: item.content?.caption || '',
+          fileName: item.content?.fileName || '',
+          title: item.content?.title || '',
+          description: item.content?.description || '',
+          footer: item.content?.footer || '',
+          buttonsList: item.content?.buttons && item.content.buttons.length > 0 ? item.content.buttons : [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
+          pollName: item.content?.name || '',
+          pollOptions: item.content?.values ? item.content.values.join(', ') : 'Opção 1, Opção 2',
+          scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString().slice(0, 16) : ''
+        }
+      })
+      
+      setNewSchedules(prev => {
+        if (prev.length === 1 && prev[0].type === 'text' && !prev[0].text && !prev[0].scheduledAt) {
+          return newItems
+        }
+        return [...prev, ...newItems]
+      })
+    } catch (e) {
+      alert("Erro ao colar: O texto na área de transferência não é um JSON válido de agendamento.")
+    }
+  }
+
   const handleMassCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (selectedGroupsForCreate.length === 0) {
@@ -1056,9 +1092,14 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               </div>
             ))}
             
-            <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setNewSchedules([...newSchedules, getEmptySchedule()])}>
-              <Plus className="w-4 h-4 mr-2" /> Adicionar Outra Mensagem
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button type="button" variant="outline" className="w-full border-dashed flex-1" onClick={() => setNewSchedules([...newSchedules, getEmptySchedule()])}>
+                <Plus className="w-4 h-4 mr-2" /> Adicionar Outra Mensagem
+              </Button>
+              <Button type="button" variant="outline" className="w-full border-dashed flex-1 text-primary hover:text-primary hover:bg-primary/10 border-primary/50" onClick={handlePasteIntoCreate}>
+                <ClipboardPaste className="w-4 h-4 mr-2" /> Colar JSON (Área de Transf.)
+              </Button>
+            </div>
 
             <div className="space-y-2 pt-4 border-t border-border/50">
               <Label>Buscar Grupo</Label>
