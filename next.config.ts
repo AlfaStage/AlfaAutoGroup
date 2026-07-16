@@ -5,13 +5,10 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '50mb',
     },
+    cpus: 2,
   },
   typescript: {
     ignoreBuildErrors: true,
-  },
-  // @ts-ignore
-  eslint: {
-    ignoreDuringBuilds: true,
   },
 };
 
