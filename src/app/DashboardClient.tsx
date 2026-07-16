@@ -8,8 +8,110 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar } from '@/components/ui/calendar'
+import { cn } from '@/lib/utils'
+import { useRef } from 'react'
+
+const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
+  const [offset, setOffset] = useState(value * 40);
+  const [isDragging, setIsDragging] = useState(false);
+  const startY = useRef(0);
+  const currentOffset = useRef(value * 40);
+  
+  useEffect(() => {
+    if (!isDragging) {
+      setOffset(value * 40);
+      currentOffset.current = value * 40;
+    }
+  }, [value, isDragging]);
+
+  const clamp = (val: number) => Math.max(0, Math.min(max * 40, val));
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    setIsDragging(true);
+    startY.current = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    const deltaY = startY.current - e.clientY;
+    startY.current = e.clientY;
+    currentOffset.current = clamp(currentOffset.current + deltaY);
+    setOffset(currentOffset.current);
+    
+    const index = Math.round(currentOffset.current / 40);
+    if (index !== value) onChange(index);
+  }
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    setIsDragging(false);
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const index = Math.round(currentOffset.current / 40);
+    const snappedOffset = index * 40;
+    setOffset(snappedOffset);
+    currentOffset.current = snappedOffset;
+    if (index !== value) onChange(index);
+  }
+  
+  const handleWheel = (e: React.WheelEvent) => {
+    let delta = e.deltaY;
+    if (Math.abs(delta) > 40) {
+      delta = Math.sign(delta) * 40;
+    }
+    const newOffset = clamp(currentOffset.current + delta);
+    currentOffset.current = newOffset;
+    setOffset(newOffset);
+    
+    const index = Math.round(newOffset / 40);
+    if (index !== value) onChange(index);
+  }
+
+  return (
+    <div 
+      className="h-[120px] w-16 border border-border/50 rounded-lg bg-card shadow-inner relative overflow-hidden select-none cursor-ns-resize"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onWheel={handleWheel}
+      style={{ touchAction: 'none' }}
+    >
+      <div 
+        className="absolute top-0 left-0 w-full"
+        style={{ 
+          transform: `translateY(${40 - offset}px)`,
+          transition: isDragging ? 'none' : 'transform 0.15s ease-out'
+        }}
+      >
+        {Array.from({length: max + 1}).map((_, i) => {
+          const distance = Math.abs(offset - i * 40);
+          const isCenter = distance < 20;
+          return (
+            <div 
+              key={i} 
+              className={`h-[40px] flex items-center justify-center text-lg transition-all ${isCenter ? 'text-primary font-bold scale-110' : 'text-muted-foreground scale-90 opacity-40 hover:opacity-80 hover:scale-100'}`}
+              onClick={() => {
+                if (!isDragging) {
+                  currentOffset.current = i * 40;
+                  setOffset(i * 40);
+                  onChange(i);
+                }
+              }}
+            >
+              {i.toString().padStart(2, '0')}
+            </div>
+          )
+        })}
+      </div>
+      <div className="absolute top-[40px] left-0 w-full h-[40px] border-y border-primary/20 pointer-events-none bg-primary/5" />
+    </div>
+  )
+}
 
 export default function DashboardClient({ initialGroups }: { initialGroups: any[] }) {
   const [groups, setGroups] = useState(initialGroups)
@@ -34,6 +136,28 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [massPasteError, setMassPasteError] = useState('')
   const [selectedGroupsForPaste, setSelectedGroupsForPaste] = useState<string[]>([])
   const [isPasting, setIsPasting] = useState(false)
+
+  // Mass Create State
+  const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
+  const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
+  const [isCreating, setIsCreating] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const [newSchedule, setNewSchedule] = useState({ 
+    type: 'text', 
+    text: '', 
+    mediaUrl: '', 
+    mediatype: 'image',
+    caption: '',
+    fileName: '',
+    title: '',
+    description: '',
+    footer: '',
+    buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }] as any[],
+    pollName: '',
+    pollOptions: 'Opção 1, Opção 2',
+    scheduledAt: '' 
+  })
 
   // Fetch instances on mount
   useEffect(() => {
@@ -271,6 +395,91 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
   }
 
+  const handleMassCreateClick = () => {
+    setSelectedGroupsForCreate([])
+    setNewSchedule({ 
+      type: 'text', text: '', mediaUrl: '', mediatype: 'image', caption: '', fileName: '',
+      title: '', description: '', footer: '', buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
+      pollName: '', pollOptions: 'Opção 1, Opção 2', scheduledAt: '' 
+    })
+    setIsMassCreateModalOpen(true)
+  }
+
+  const handleMassCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (selectedGroupsForCreate.length === 0) {
+      alert("Selecione pelo menos um grupo destino.")
+      return
+    }
+    setIsCreating(true)
+    
+    let content: any = {}
+    
+    if (newSchedule.type === 'text') {
+      content = { text: newSchedule.text }
+    } else if (newSchedule.type === 'media') {
+      content = { 
+        mediatype: newSchedule.mediatype, 
+        media: newSchedule.mediaUrl, 
+        caption: newSchedule.caption,
+        fileName: newSchedule.fileName
+      }
+    } else if (newSchedule.type === 'button') {
+      content = {
+        title: newSchedule.title,
+        description: newSchedule.description,
+        footer: newSchedule.footer,
+        buttons: newSchedule.buttonsList
+      }
+      const hasCTA = newSchedule.buttonsList.some((b: any) => b.type !== 'reply')
+      if (!hasCTA && newSchedule.mediaUrl) {
+        if (newSchedule.mediatype === 'video') {
+          content.videoUrl = newSchedule.mediaUrl
+        } else {
+          content.imageUrl = newSchedule.mediaUrl
+        }
+      }
+    } else if (newSchedule.type === 'poll') {
+      const opts = newSchedule.pollOptions.split(',').map(o => o.trim()).filter(Boolean);
+      content = {
+        name: newSchedule.pollName,
+        selectableCount: 1,
+        values: opts
+      }
+    }
+
+    try {
+      let insertedCount = 0
+      for (const groupId of selectedGroupsForCreate) {
+        const payload = {
+          groupId: groupId,
+          type: newSchedule.type,
+          content,
+          scheduledAt: new Date(newSchedule.scheduledAt).toISOString(),
+          status: 'pending'
+        }
+        
+        const res = await fetch('/api/schedules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        if (res.ok) {
+          insertedCount++
+        }
+      }
+      
+      alert(`${insertedCount} agendamento(s) criado(s) com sucesso em ${selectedGroupsForCreate.length} grupo(s)!`)
+      setIsMassCreateModalOpen(false)
+      window.location.reload()
+    } catch (err) {
+      console.error(err)
+      alert("Erro ao criar agendamentos em massa.")
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
   const filteredGroups = selectedInstance ? groups.filter(g => g.instanceName === selectedInstance) : []
   const totalGroups = filteredGroups.length
   const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
@@ -363,16 +572,20 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <h2 className="text-2xl font-bold tracking-tight">Meus Grupos</h2>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Button variant="outline" onClick={handleMassPasteClick} className="flex-1 sm:flex-none text-primary border-primary hover:bg-primary/10">
+          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
+            <Button variant="outline" onClick={handleMassPasteClick} className="flex-none text-primary border-primary hover:bg-primary/10">
               <ClipboardPaste className="w-4 h-4 mr-2" />
-              Colar em Massa
+              Colar
             </Button>
-            <Button variant="secondary" onClick={handleSyncGroups} className="flex-1 sm:flex-none">
+            <Button onClick={handleMassCreateClick} className="flex-none">
+              <Edit className="w-4 h-4 mr-2" />
+              Criar em Massa
+            </Button>
+            <Button variant="secondary" onClick={handleSyncGroups} className="flex-none">
               <RefreshCcw className="w-4 h-4 mr-2" />
               Sincronizar
             </Button>
-            <Button onClick={() => setIsModalOpen(true)} className="flex-1 sm:flex-none">
+            <Button variant="outline" onClick={() => setIsModalOpen(true)} className="flex-none">
               <Plus className="w-4 h-4 mr-2" />
               Adicionar
             </Button>
@@ -522,6 +735,336 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               </Button>
             </DialogFooter>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mass Create Dialog */}
+      <Dialog open={isMassCreateModalOpen} onOpenChange={setIsMassCreateModalOpen}>
+        <DialogContent className="sm:max-w-[550px] w-[95vw] max-h-[85vh] overflow-y-auto rounded-xl">
+          <DialogHeader>
+            <DialogTitle>Criar Agendamento em Massa</DialogTitle>
+            <DialogDescription>
+              Crie uma mensagem nova e selecione em quais grupos deseja agendá-la.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleMassCreateSubmit} className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Tipo de Mensagem</Label>
+              <Select value={newSchedule.type} onValueChange={v => setNewSchedule({...newSchedule, type: v})}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o tipo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="text">Texto Simples</SelectItem>
+                  <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, Doc)</SelectItem>
+                  <SelectItem value="button">Botões (Interativo)</SelectItem>
+                  <SelectItem value="poll">Enquete</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {newSchedule.type === 'text' && (
+              <div className="space-y-2">
+                <Label>Mensagem</Label>
+                <Textarea required placeholder="Digite sua mensagem aqui..." value={newSchedule.text} onChange={e => setNewSchedule({...newSchedule, text: e.target.value})} rows={5} className="resize-none" />
+              </div>
+            )}
+
+            {newSchedule.type === 'media' && (
+              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                <div className="space-y-2">
+                  <Label>Tipo de Mídia</Label>
+                  <Select value={newSchedule.mediatype} onValueChange={v => setNewSchedule({...newSchedule, mediatype: v})}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Tipo de mídia..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="image">Imagem</SelectItem>
+                      <SelectItem value="video">Vídeo</SelectItem>
+                      <SelectItem value="audio">Áudio</SelectItem>
+                      <SelectItem value="document">Documento PDF/ZIP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label>URL da Mídia ou Upload</Label>
+                  <div className="flex gap-2">
+                    <Input required placeholder="https://..." value={newSchedule.mediaUrl} onChange={e => setNewSchedule({...newSchedule, mediaUrl: e.target.value})} />
+                    <input type="file" id="mediaUploadMass" className="hidden" onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if(!file) return;
+                      
+                      setIsUploading(true);
+                      setUploadError('');
+                      
+                      const fd = new FormData(); fd.append('file', file);
+                      try {
+                        const res = await fetch('/api/upload', {method:'POST', body:fd});
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          setNewSchedule({...newSchedule, mediaUrl: data.url});
+                        } else {
+                          setUploadError(data.error || 'Erro interno no servidor ao realizar upload.');
+                        }
+                      } catch(err: any) {
+                        setUploadError(err.message || 'Erro na conexão de upload');
+                      } finally {
+                        setIsUploading(false);
+                      }
+                    }}/>
+                    <Button type="button" variant="secondary" onClick={() => document.getElementById('mediaUploadMass')?.click()} disabled={isUploading}>
+                      {isUploading ? <span className="text-xs">⏳</span> : <Upload className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                  {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Legenda (Opcional)</Label>
+                  <Textarea placeholder="Legenda da mídia..." value={newSchedule.caption} onChange={e => setNewSchedule({...newSchedule, caption: e.target.value})} rows={2} />
+                </div>
+
+                {newSchedule.mediatype === 'document' && (
+                  <div className="space-y-2">
+                    <Label>Nome do Arquivo (Obrigatório)</Label>
+                    <Input required placeholder="relatorio_final.pdf" value={newSchedule.fileName} onChange={e => setNewSchedule({...newSchedule, fileName: e.target.value})} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {newSchedule.type === 'button' && (
+              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                <div className="space-y-2">
+                  <Label>Título Principal</Label>
+                  <Input required placeholder="Ex: Oferta Especial!" value={newSchedule.title} onChange={e => setNewSchedule({...newSchedule, title: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Descrição</Label>
+                  <Textarea required placeholder="Detalhes da oferta..." value={newSchedule.description} onChange={e => setNewSchedule({...newSchedule, description: e.target.value})} rows={2} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Rodapé (Opcional)</Label>
+                  <Input placeholder="Válido até amanhã" value={newSchedule.footer} onChange={e => setNewSchedule({...newSchedule, footer: e.target.value})} />
+                </div>
+                
+                {/* Midia Opcional */}
+                {!newSchedule.buttonsList.some((b:any)=>b.type!=='reply') && (
+                  <div className="p-3 border border-border bg-background rounded-lg space-y-3">
+                    <Label className="text-xs text-muted-foreground font-semibold">Anexar Mídia (Opcional)</Label>
+                    <div className="flex gap-2">
+                      <Select value={newSchedule.mediatype} onValueChange={v => setNewSchedule({...newSchedule, mediatype: v})}>
+                        <SelectTrigger className="w-[120px]">
+                          <SelectValue placeholder="Mídia..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="image">Imagem</SelectItem>
+                          <SelectItem value="video">Vídeo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input placeholder="URL da Mídia" value={newSchedule.mediaUrl} onChange={e => setNewSchedule({...newSchedule, mediaUrl: e.target.value})} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 space-y-3">
+                  <Label className="font-semibold text-sm">Botões (Max 3)</Label>
+                  {newSchedule.buttonsList.map((btn: any, index: number) => (
+                    <div key={index} className="p-3 border border-border/50 bg-background rounded-lg space-y-3 relative group">
+                      <div className="flex justify-between items-center">
+                        <Select value={btn.type} onValueChange={v => {
+                          const list = [...newSchedule.buttonsList];
+                          list[index] = {...btn, type: v};
+                          setNewSchedule({...newSchedule, buttonsList: list});
+                        }}>
+                          <SelectTrigger className="w-[160px] h-8 border-none bg-transparent text-primary hover:bg-muted/50 font-medium focus:ring-0 px-2">
+                            <SelectValue placeholder="Tipo..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="reply">Resposta Rápida</SelectItem>
+                            <SelectItem value="url">Link Externo</SelectItem>
+                            <SelectItem value="call">Ligar</SelectItem>
+                            <SelectItem value="copy">Copiar Texto</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {newSchedule.buttonsList.length > 1 && (
+                          <button type="button" onClick={() => {
+                            const list = newSchedule.buttonsList.filter((_,i) => i!==index);
+                            setNewSchedule({...newSchedule, buttonsList: list});
+                          }} className="text-destructive opacity-50 hover:opacity-100 transition-opacity">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      
+                      <Input required placeholder="Texto do botão (ex: Comprar)" value={btn.displayText||''} onChange={e => {
+                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, displayText: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
+                      }} className="h-8" />
+                      
+                      {btn.type === 'reply' && <Input required placeholder="ID interno (ex: btn_comprar)" value={btn.id||''} onChange={e => {
+                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, id: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
+                      }} className="h-8" />}
+                      
+                      {btn.type === 'url' && <Input required placeholder="https://..." value={btn.url||''} onChange={e => {
+                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, url: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
+                      }} className="h-8" />}
+                      
+                      {btn.type === 'call' && <Input required placeholder="+5511999999999" value={btn.phoneNumber||''} onChange={e => {
+                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, phoneNumber: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
+                      }} className="h-8" />}
+                      
+                      {btn.type === 'copy' && <Input required placeholder="Texto para copiar..." value={btn.copyCode||''} onChange={e => {
+                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, copyCode: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
+                      }} className="h-8" />}
+                    </div>
+                  ))}
+                  {newSchedule.buttonsList.length < 3 && (
+                    <Button type="button" variant="secondary" size="sm" className="w-full border-dashed" onClick={() => {
+                      setNewSchedule({...newSchedule, buttonsList: [...newSchedule.buttonsList, {type:'reply', displayText:'', id:'btn'+Date.now()}]});
+                    }}>+ Adicionar Botão</Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {newSchedule.type === 'poll' && (
+              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                <div className="space-y-2">
+                  <Label>Pergunta da Enquete</Label>
+                  <Input required placeholder="Ex: Qual o melhor horário?" value={newSchedule.pollName} onChange={e => setNewSchedule({...newSchedule, pollName: e.target.value})} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Opções (Separadas por vírgula)</Label>
+                  <Input required placeholder="Manhã, Tarde, Noite" value={newSchedule.pollOptions} onChange={e => setNewSchedule({...newSchedule, pollOptions: e.target.value})} />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-2 border-t border-border/50 flex flex-col">
+              <Label>Data e Hora do Envio</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-full justify-start text-left font-normal",
+                      !newSchedule.scheduledAt && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarDays className="mr-2 h-4 w-4" />
+                    {newSchedule.scheduledAt ? (
+                      new Date(newSchedule.scheduledAt).toLocaleString('pt-BR', { dateStyle: 'long', timeStyle: 'short' })
+                    ) : (
+                      <span>Escolha uma data e horário</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[95vw] sm:w-auto p-0 max-h-[85vh] overflow-y-auto rounded-xl" align="center">
+                  <Calendar
+                    mode="single"
+                    selected={newSchedule.scheduledAt ? new Date(newSchedule.scheduledAt) : undefined}
+                    onSelect={(d) => {
+                      if (d) {
+                         const current = newSchedule.scheduledAt ? new Date(newSchedule.scheduledAt) : new Date();
+                         d.setHours(current.getHours());
+                         d.setMinutes(current.getMinutes());
+                         const tzOffset = d.getTimezoneOffset() * 60000;
+                         const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+                         setNewSchedule({...newSchedule, scheduledAt: localISOTime});
+                      }
+                    }}
+                  />
+                  <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-3 bg-muted/20">
+                    <Label className="text-sm font-semibold w-full text-center text-muted-foreground">Selecione o Horário</Label>
+                    <div className="flex items-center gap-4">
+                      <ScrollDial 
+                        max={23} 
+                        value={newSchedule.scheduledAt ? parseInt(newSchedule.scheduledAt.split('T')[1]?.split(':')[0] || '12', 10) : 12}
+                        onChange={(h) => {
+                          let m = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[1]?.split(':')[1] : '00';
+                          if (!m) m = '00';
+                          
+                          let localDate = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[0] : '';
+                          if (!localDate) {
+                            const today = new Date();
+                            const tzOffset = today.getTimezoneOffset() * 60000;
+                            localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
+                          }
+                          
+                          setNewSchedule({...newSchedule, scheduledAt: `${localDate}T${h.toString().padStart(2, '0')}:${m}`});
+                        }}
+                      />
+                      <span className="text-2xl font-bold text-muted-foreground/50">:</span>
+                      <ScrollDial 
+                        max={59} 
+                        value={newSchedule.scheduledAt ? parseInt(newSchedule.scheduledAt.split('T')[1]?.split(':')[1] || '0', 10) : 0}
+                        onChange={(m) => {
+                          let h = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[1]?.split(':')[0] : '12';
+                          if (!h) h = '12';
+                          
+                          let localDate = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[0] : '';
+                          if (!localDate) {
+                            const today = new Date();
+                            const tzOffset = today.getTimezoneOffset() * 60000;
+                            localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
+                          }
+                          
+                          setNewSchedule({...newSchedule, scheduledAt: `${localDate}T${h}:${m.toString().padStart(2, '0')}`});
+                        }}
+                      />
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-2 pt-4 border-t border-border/50">
+              <div className="flex items-center justify-between">
+                <Label>Selecione os Grupos Destino</Label>
+                <Button type="button" variant="ghost" size="sm" onClick={() => {
+                  if (selectedGroupsForCreate.length === filteredGroups.length) {
+                    setSelectedGroupsForCreate([])
+                  } else {
+                    setSelectedGroupsForCreate(filteredGroups.map(g => g.id))
+                  }
+                }}>
+                  {selectedGroupsForCreate.length === filteredGroups.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[200px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
+                {filteredGroups.map(g => (
+                  <label key={g.id} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      checked={selectedGroupsForCreate.includes(g.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedGroupsForCreate([...selectedGroupsForCreate, g.id])
+                        } else {
+                          setSelectedGroupsForCreate(selectedGroupsForCreate.filter(id => id !== g.id))
+                        }
+                      }}
+                    />
+                    <span className="text-sm font-medium truncate flex-1">{g.name}</span>
+                  </label>
+                ))}
+                {filteredGroups.length === 0 && (
+                  <div className="col-span-full text-center text-xs text-muted-foreground p-4">
+                    Nenhum grupo encontrado nesta instância.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
+              <Button type="button" variant="secondary" onClick={() => setIsMassCreateModalOpen(false)} className="w-full sm:w-auto" disabled={isCreating}>Cancelar</Button>
+              <Button type="submit" className="w-full sm:w-auto" disabled={!newSchedule.scheduledAt || selectedGroupsForCreate.length === 0 || isCreating}>
+                {isCreating ? 'Agendando...' : `Criar em ${selectedGroupsForCreate.length} grupo(s)`}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
