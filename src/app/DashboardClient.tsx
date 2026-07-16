@@ -143,7 +143,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [isCreating, setIsCreating] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
-  const [newSchedule, setNewSchedule] = useState({ 
+  
+  const getEmptySchedule = () => ({ 
     type: 'text', 
     text: '', 
     mediaUrl: '', 
@@ -158,6 +159,12 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     pollOptions: 'Opção 1, Opção 2',
     scheduledAt: '' 
   })
+  
+  const [newSchedules, setNewSchedules] = useState([getEmptySchedule()])
+
+  const updateSchedule = (index: number, updates: any) => {
+    setNewSchedules(prev => prev.map((s, i) => i === index ? { ...s, ...updates } : s))
+  }
 
   // Fetch instances on mount
   useEffect(() => {
@@ -397,11 +404,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
 
   const handleMassCreateClick = () => {
     setSelectedGroupsForCreate([])
-    setNewSchedule({ 
-      type: 'text', text: '', mediaUrl: '', mediatype: 'image', caption: '', fileName: '',
-      title: '', description: '', footer: '', buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
-      pollName: '', pollOptions: 'Opção 1, Opção 2', scheduledAt: '' 
-    })
+    setNewSchedules([getEmptySchedule()])
     setIsMassCreateModalOpen(true)
   }
 
@@ -411,61 +414,71 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       alert("Selecione pelo menos um grupo destino.")
       return
     }
-    setIsCreating(true)
-    
-    let content: any = {}
-    
-    if (newSchedule.type === 'text') {
-      content = { text: newSchedule.text }
-    } else if (newSchedule.type === 'media') {
-      content = { 
-        mediatype: newSchedule.mediatype, 
-        media: newSchedule.mediaUrl, 
-        caption: newSchedule.caption,
-        fileName: newSchedule.fileName
-      }
-    } else if (newSchedule.type === 'button') {
-      content = {
-        title: newSchedule.title,
-        description: newSchedule.description,
-        footer: newSchedule.footer,
-        buttons: newSchedule.buttonsList
-      }
-      const hasCTA = newSchedule.buttonsList.some((b: any) => b.type !== 'reply')
-      if (!hasCTA && newSchedule.mediaUrl) {
-        if (newSchedule.mediatype === 'video') {
-          content.videoUrl = newSchedule.mediaUrl
-        } else {
-          content.imageUrl = newSchedule.mediaUrl
-        }
-      }
-    } else if (newSchedule.type === 'poll') {
-      const opts = newSchedule.pollOptions.split(',').map(o => o.trim()).filter(Boolean);
-      content = {
-        name: newSchedule.pollName,
-        selectableCount: 1,
-        values: opts
+
+    for (const schedule of newSchedules) {
+      if (!schedule.scheduledAt) {
+        alert("Preencha a Data e Hora para todas as mensagens.")
+        return
       }
     }
 
+    setIsCreating(true)
+    
     try {
       let insertedCount = 0
       for (const groupId of selectedGroupsForCreate) {
-        const payload = {
-          groupId: groupId,
-          type: newSchedule.type,
-          content,
-          scheduledAt: new Date(newSchedule.scheduledAt).toISOString(),
-          status: 'pending'
-        }
-        
-        const res = await fetch('/api/schedules', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        if (res.ok) {
-          insertedCount++
+        for (const schedule of newSchedules) {
+          let content: any = {}
+          
+          if (schedule.type === 'text') {
+            content = { text: schedule.text }
+          } else if (schedule.type === 'media') {
+            content = { 
+              mediatype: schedule.mediatype, 
+              media: schedule.mediaUrl, 
+              caption: schedule.caption,
+              fileName: schedule.fileName
+            }
+          } else if (schedule.type === 'button') {
+            content = {
+              title: schedule.title,
+              description: schedule.description,
+              footer: schedule.footer,
+              buttons: schedule.buttonsList
+            }
+            const hasCTA = schedule.buttonsList.some((b: any) => b.type !== 'reply')
+            if (!hasCTA && schedule.mediaUrl) {
+              if (schedule.mediatype === 'video') {
+                content.videoUrl = schedule.mediaUrl
+              } else {
+                content.imageUrl = schedule.mediaUrl
+              }
+            }
+          } else if (schedule.type === 'poll') {
+            const opts = schedule.pollOptions.split(',').map(o => o.trim()).filter(Boolean);
+            content = {
+              name: schedule.pollName,
+              selectableCount: 1,
+              values: opts
+            }
+          }
+
+          const payload = {
+            groupId: groupId,
+            type: schedule.type,
+            content,
+            scheduledAt: new Date(schedule.scheduledAt).toISOString(),
+            status: 'pending'
+          }
+          
+          const res = await fetch('/api/schedules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          })
+          if (res.ok) {
+            insertedCount++
+          }
         }
       }
       
@@ -480,7 +493,9 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
   }
 
-  const filteredGroups = selectedInstance ? groups.filter(g => g.instanceName === selectedInstance) : []
+  const filteredGroups = selectedInstance 
+    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name)) 
+    : []
   const totalGroups = filteredGroups.length
   const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
   const totalSchedules = filteredGroups.reduce((acc, g) => acc + (g._count?.schedules || 0), 0)
@@ -748,276 +763,289 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleMassCreateSubmit} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Tipo de Mensagem</Label>
-              <Select value={newSchedule.type} onValueChange={v => setNewSchedule({...newSchedule, type: v})}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o tipo..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="text">Texto Simples</SelectItem>
-                  <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, Doc)</SelectItem>
-                  <SelectItem value="button">Botões (Interativo)</SelectItem>
-                  <SelectItem value="poll">Enquete</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {newSchedule.type === 'text' && (
-              <div className="space-y-2">
-                <Label>Mensagem</Label>
-                <Textarea required placeholder="Digite sua mensagem aqui..." value={newSchedule.text} onChange={e => setNewSchedule({...newSchedule, text: e.target.value})} rows={5} className="resize-none" />
-              </div>
-            )}
-
-            {newSchedule.type === 'media' && (
-              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
-                <div className="space-y-2">
-                  <Label>Tipo de Mídia</Label>
-                  <Select value={newSchedule.mediatype} onValueChange={v => setNewSchedule({...newSchedule, mediatype: v})}>
+            {newSchedules.map((schedule, index) => (
+              <div key={index} className="space-y-4 border border-border/60 p-4 rounded-xl bg-card relative mb-6">
+                {newSchedules.length > 1 && (
+                  <Button type="button" variant="ghost" size="sm" className="absolute top-2 right-2 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setNewSchedules(newSchedules.filter((_, i) => i !== index))}>
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+                <div className="space-y-2 pr-8">
+                  <Label>Tipo de Mensagem {index + 1}</Label>
+                  <Select value={schedule.type} onValueChange={v => updateSchedule(index, { type: v })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Tipo de mídia..." />
+                      <SelectValue placeholder="Selecione o tipo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="image">Imagem</SelectItem>
-                      <SelectItem value="video">Vídeo</SelectItem>
-                      <SelectItem value="audio">Áudio</SelectItem>
-                      <SelectItem value="document">Documento PDF/ZIP</SelectItem>
+                      <SelectItem value="text">Texto Simples</SelectItem>
+                      <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, Doc)</SelectItem>
+                      <SelectItem value="button">Botões (Interativo)</SelectItem>
+                      <SelectItem value="poll">Enquete</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                
-                <div className="space-y-2">
-                  <Label>URL da Mídia ou Upload</Label>
-                  <div className="flex gap-2">
-                    <Input required placeholder="https://..." value={newSchedule.mediaUrl} onChange={e => setNewSchedule({...newSchedule, mediaUrl: e.target.value})} />
-                    <input type="file" id="mediaUploadMass" className="hidden" onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if(!file) return;
-                      
-                      setIsUploading(true);
-                      setUploadError('');
-                      
-                      const fd = new FormData(); fd.append('file', file);
-                      try {
-                        const res = await fetch('/api/upload', {method:'POST', body:fd});
-                        const data = await res.json();
-                        if (res.ok && data.success) {
-                          setNewSchedule({...newSchedule, mediaUrl: data.url});
-                        } else {
-                          setUploadError(data.error || 'Erro interno no servidor ao realizar upload.');
-                        }
-                      } catch(err: any) {
-                        setUploadError(err.message || 'Erro na conexão de upload');
-                      } finally {
-                        setIsUploading(false);
-                      }
-                    }}/>
-                    <Button type="button" variant="secondary" onClick={() => document.getElementById('mediaUploadMass')?.click()} disabled={isUploading}>
-                      {isUploading ? <span className="text-xs">⏳</span> : <Upload className="w-4 h-4" />}
-                    </Button>
-                  </div>
-                  {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
-                </div>
 
-                <div className="space-y-2">
-                  <Label>Legenda (Opcional)</Label>
-                  <Textarea placeholder="Legenda da mídia..." value={newSchedule.caption} onChange={e => setNewSchedule({...newSchedule, caption: e.target.value})} rows={2} />
-                </div>
-
-                {newSchedule.mediatype === 'document' && (
+                {schedule.type === 'text' && (
                   <div className="space-y-2">
-                    <Label>Nome do Arquivo (Obrigatório)</Label>
-                    <Input required placeholder="relatorio_final.pdf" value={newSchedule.fileName} onChange={e => setNewSchedule({...newSchedule, fileName: e.target.value})} />
+                    <Label>Mensagem</Label>
+                    <Textarea required placeholder="Digite sua mensagem aqui..." value={schedule.text} onChange={e => updateSchedule(index, { text: e.target.value })} rows={5} className="resize-none" />
                   </div>
                 )}
-              </div>
-            )}
 
-            {newSchedule.type === 'button' && (
-              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
-                <div className="space-y-2">
-                  <Label>Título Principal</Label>
-                  <Input required placeholder="Ex: Oferta Especial!" value={newSchedule.title} onChange={e => setNewSchedule({...newSchedule, title: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Descrição</Label>
-                  <Textarea required placeholder="Detalhes da oferta..." value={newSchedule.description} onChange={e => setNewSchedule({...newSchedule, description: e.target.value})} rows={2} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Rodapé (Opcional)</Label>
-                  <Input placeholder="Válido até amanhã" value={newSchedule.footer} onChange={e => setNewSchedule({...newSchedule, footer: e.target.value})} />
-                </div>
-                
-                {/* Midia Opcional */}
-                {!newSchedule.buttonsList.some((b:any)=>b.type!=='reply') && (
-                  <div className="p-3 border border-border bg-background rounded-lg space-y-3">
-                    <Label className="text-xs text-muted-foreground font-semibold">Anexar Mídia (Opcional)</Label>
-                    <div className="flex gap-2">
-                      <Select value={newSchedule.mediatype} onValueChange={v => setNewSchedule({...newSchedule, mediatype: v})}>
-                        <SelectTrigger className="w-[120px]">
-                          <SelectValue placeholder="Mídia..." />
+                {schedule.type === 'media' && (
+                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                    <div className="space-y-2">
+                      <Label>Tipo de Mídia</Label>
+                      <Select value={schedule.mediatype} onValueChange={v => updateSchedule(index, { mediatype: v })}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Tipo de mídia..." />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="image">Imagem</SelectItem>
                           <SelectItem value="video">Vídeo</SelectItem>
+                          <SelectItem value="audio">Áudio</SelectItem>
+                          <SelectItem value="document">Documento PDF/ZIP</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Input placeholder="URL da Mídia" value={newSchedule.mediaUrl} onChange={e => setNewSchedule({...newSchedule, mediaUrl: e.target.value})} />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label>URL da Mídia ou Upload</Label>
+                      <div className="flex gap-2">
+                        <Input required placeholder="https://..." value={schedule.mediaUrl} onChange={e => updateSchedule(index, { mediaUrl: e.target.value })} />
+                        <input type="file" id={`mediaUploadMass-${index}`} className="hidden" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if(!file) return;
+                          
+                          setIsUploading(true);
+                          setUploadError('');
+                          
+                          const fd = new FormData(); fd.append('file', file);
+                          try {
+                            const res = await fetch('/api/upload', {method:'POST', body:fd});
+                            const data = await res.json();
+                            if (res.ok && data.success) {
+                              updateSchedule(index, { mediaUrl: data.url });
+                            } else {
+                              setUploadError(data.error || 'Erro interno no servidor ao realizar upload.');
+                            }
+                          } catch(err: any) {
+                            setUploadError(err.message || 'Erro na conexão de upload');
+                          } finally {
+                            setIsUploading(false);
+                          }
+                        }}/>
+                        <Button type="button" variant="secondary" onClick={() => document.getElementById(`mediaUploadMass-${index}`)?.click()} disabled={isUploading}>
+                          {isUploading ? <span className="text-xs">⏳</span> : <Upload className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                      {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Legenda (Opcional)</Label>
+                      <Textarea placeholder="Legenda da mídia..." value={schedule.caption} onChange={e => updateSchedule(index, { caption: e.target.value })} rows={2} />
+                    </div>
+
+                    {schedule.mediatype === 'document' && (
+                      <div className="space-y-2">
+                        <Label>Nome do Arquivo (Obrigatório)</Label>
+                        <Input required placeholder="relatorio_final.pdf" value={schedule.fileName} onChange={e => updateSchedule(index, { fileName: e.target.value })} />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {schedule.type === 'button' && (
+                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                    <div className="space-y-2">
+                      <Label>Título Principal</Label>
+                      <Input required placeholder="Ex: Oferta Especial!" value={schedule.title} onChange={e => updateSchedule(index, { title: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Descrição</Label>
+                      <Textarea required placeholder="Detalhes da oferta..." value={schedule.description} onChange={e => updateSchedule(index, { description: e.target.value })} rows={2} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Rodapé (Opcional)</Label>
+                      <Input placeholder="Válido até amanhã" value={schedule.footer} onChange={e => updateSchedule(index, { footer: e.target.value })} />
+                    </div>
+                    
+                    {/* Midia Opcional */}
+                    {!schedule.buttonsList.some((b:any)=>b.type!=='reply') && (
+                      <div className="p-3 border border-border bg-background rounded-lg space-y-3">
+                        <Label className="text-xs text-muted-foreground font-semibold">Anexar Mídia (Opcional)</Label>
+                        <div className="flex gap-2">
+                          <Select value={schedule.mediatype} onValueChange={v => updateSchedule(index, { mediatype: v })}>
+                            <SelectTrigger className="w-[120px]">
+                              <SelectValue placeholder="Mídia..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="image">Imagem</SelectItem>
+                              <SelectItem value="video">Vídeo</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input placeholder="URL da Mídia" value={schedule.mediaUrl} onChange={e => updateSchedule(index, { mediaUrl: e.target.value })} />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2 space-y-3">
+                      <Label className="font-semibold text-sm">Botões (Max 3)</Label>
+                      {schedule.buttonsList.map((btn: any, btnIndex: number) => (
+                        <div key={btnIndex} className="p-3 border border-border/50 bg-background rounded-lg space-y-3 relative group">
+                          <div className="flex justify-between items-center">
+                            <Select value={btn.type} onValueChange={v => {
+                              const list = [...schedule.buttonsList];
+                              list[btnIndex] = {...btn, type: v};
+                              updateSchedule(index, { buttonsList: list });
+                            }}>
+                              <SelectTrigger className="w-[160px] h-8 border-none bg-transparent text-primary hover:bg-muted/50 font-medium focus:ring-0 px-2">
+                                <SelectValue placeholder="Tipo..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="reply">Resposta Rápida</SelectItem>
+                                <SelectItem value="url">Link Externo</SelectItem>
+                                <SelectItem value="call">Ligar</SelectItem>
+                                <SelectItem value="copy">Copiar Texto</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {schedule.buttonsList.length > 1 && (
+                              <button type="button" onClick={() => {
+                                const list = schedule.buttonsList.filter((_,i) => i!==btnIndex);
+                                updateSchedule(index, { buttonsList: list });
+                              }} className="text-destructive opacity-50 hover:opacity-100 transition-opacity">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          
+                          <Input required placeholder="Texto do botão (ex: Comprar)" value={btn.displayText||''} onChange={e => {
+                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, displayText: e.target.value}; updateSchedule(index, { buttonsList: list });
+                          }} className="h-8" />
+                          
+                          {btn.type === 'reply' && <Input required placeholder="ID interno (ex: btn_comprar)" value={btn.id||''} onChange={e => {
+                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, id: e.target.value}; updateSchedule(index, { buttonsList: list });
+                          }} className="h-8" />}
+                          
+                          {btn.type === 'url' && <Input required placeholder="https://..." value={btn.url||''} onChange={e => {
+                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, url: e.target.value}; updateSchedule(index, { buttonsList: list });
+                          }} className="h-8" />}
+                          
+                          {btn.type === 'call' && <Input required placeholder="+5511999999999" value={btn.phoneNumber||''} onChange={e => {
+                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, phoneNumber: e.target.value}; updateSchedule(index, { buttonsList: list });
+                          }} className="h-8" />}
+                          
+                          {btn.type === 'copy' && <Input required placeholder="Texto para copiar..." value={btn.copyCode||''} onChange={e => {
+                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, copyCode: e.target.value}; updateSchedule(index, { buttonsList: list });
+                          }} className="h-8" />}
+                        </div>
+                      ))}
+                      {schedule.buttonsList.length < 3 && (
+                        <Button type="button" variant="secondary" size="sm" className="w-full border-dashed" onClick={() => {
+                          updateSchedule(index, { buttonsList: [...schedule.buttonsList, {type:'reply', displayText:'', id:'btn'+Date.now()}] });
+                        }}>+ Adicionar Botão</Button>
+                      )}
                     </div>
                   </div>
                 )}
 
-                <div className="pt-2 space-y-3">
-                  <Label className="font-semibold text-sm">Botões (Max 3)</Label>
-                  {newSchedule.buttonsList.map((btn: any, index: number) => (
-                    <div key={index} className="p-3 border border-border/50 bg-background rounded-lg space-y-3 relative group">
-                      <div className="flex justify-between items-center">
-                        <Select value={btn.type} onValueChange={v => {
-                          const list = [...newSchedule.buttonsList];
-                          list[index] = {...btn, type: v};
-                          setNewSchedule({...newSchedule, buttonsList: list});
-                        }}>
-                          <SelectTrigger className="w-[160px] h-8 border-none bg-transparent text-primary hover:bg-muted/50 font-medium focus:ring-0 px-2">
-                            <SelectValue placeholder="Tipo..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="reply">Resposta Rápida</SelectItem>
-                            <SelectItem value="url">Link Externo</SelectItem>
-                            <SelectItem value="call">Ligar</SelectItem>
-                            <SelectItem value="copy">Copiar Texto</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {newSchedule.buttonsList.length > 1 && (
-                          <button type="button" onClick={() => {
-                            const list = newSchedule.buttonsList.filter((_,i) => i!==index);
-                            setNewSchedule({...newSchedule, buttonsList: list});
-                          }} className="text-destructive opacity-50 hover:opacity-100 transition-opacity">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                      
-                      <Input required placeholder="Texto do botão (ex: Comprar)" value={btn.displayText||''} onChange={e => {
-                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, displayText: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
-                      }} className="h-8" />
-                      
-                      {btn.type === 'reply' && <Input required placeholder="ID interno (ex: btn_comprar)" value={btn.id||''} onChange={e => {
-                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, id: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
-                      }} className="h-8" />}
-                      
-                      {btn.type === 'url' && <Input required placeholder="https://..." value={btn.url||''} onChange={e => {
-                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, url: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
-                      }} className="h-8" />}
-                      
-                      {btn.type === 'call' && <Input required placeholder="+5511999999999" value={btn.phoneNumber||''} onChange={e => {
-                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, phoneNumber: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
-                      }} className="h-8" />}
-                      
-                      {btn.type === 'copy' && <Input required placeholder="Texto para copiar..." value={btn.copyCode||''} onChange={e => {
-                        const list = [...newSchedule.buttonsList]; list[index] = {...btn, copyCode: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
-                      }} className="h-8" />}
+                {schedule.type === 'poll' && (
+                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                    <div className="space-y-2">
+                      <Label>Pergunta da Enquete</Label>
+                      <Input required placeholder="Ex: Qual o melhor horário?" value={schedule.pollName} onChange={e => updateSchedule(index, { pollName: e.target.value })} />
                     </div>
-                  ))}
-                  {newSchedule.buttonsList.length < 3 && (
-                    <Button type="button" variant="secondary" size="sm" className="w-full border-dashed" onClick={() => {
-                      setNewSchedule({...newSchedule, buttonsList: [...newSchedule.buttonsList, {type:'reply', displayText:'', id:'btn'+Date.now()}]});
-                    }}>+ Adicionar Botão</Button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {newSchedule.type === 'poll' && (
-              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
-                <div className="space-y-2">
-                  <Label>Pergunta da Enquete</Label>
-                  <Input required placeholder="Ex: Qual o melhor horário?" value={newSchedule.pollName} onChange={e => setNewSchedule({...newSchedule, pollName: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Opções (Separadas por vírgula)</Label>
-                  <Input required placeholder="Manhã, Tarde, Noite" value={newSchedule.pollOptions} onChange={e => setNewSchedule({...newSchedule, pollOptions: e.target.value})} />
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2 pt-2 border-t border-border/50 flex flex-col">
-              <Label>Data e Hora do Envio</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant={"outline"}
-                    className={cn(
-                      "w-full justify-start text-left font-normal",
-                      !newSchedule.scheduledAt && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarDays className="mr-2 h-4 w-4" />
-                    {newSchedule.scheduledAt ? (
-                      new Date(newSchedule.scheduledAt).toLocaleString('pt-BR', { dateStyle: 'long', timeStyle: 'short' })
-                    ) : (
-                      <span>Escolha uma data e horário</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[95vw] sm:w-auto p-0 max-h-[85vh] overflow-y-auto rounded-xl" align="center">
-                  <Calendar
-                    mode="single"
-                    selected={newSchedule.scheduledAt ? new Date(newSchedule.scheduledAt) : undefined}
-                    onSelect={(d) => {
-                      if (d) {
-                         const current = newSchedule.scheduledAt ? new Date(newSchedule.scheduledAt) : new Date();
-                         d.setHours(current.getHours());
-                         d.setMinutes(current.getMinutes());
-                         const tzOffset = d.getTimezoneOffset() * 60000;
-                         const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
-                         setNewSchedule({...newSchedule, scheduledAt: localISOTime});
-                      }
-                    }}
-                  />
-                  <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-3 bg-muted/20">
-                    <Label className="text-sm font-semibold w-full text-center text-muted-foreground">Selecione o Horário</Label>
-                    <div className="flex items-center gap-4">
-                      <ScrollDial 
-                        max={23} 
-                        value={newSchedule.scheduledAt ? parseInt(newSchedule.scheduledAt.split('T')[1]?.split(':')[0] || '12', 10) : 12}
-                        onChange={(h) => {
-                          let m = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[1]?.split(':')[1] : '00';
-                          if (!m) m = '00';
-                          
-                          let localDate = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[0] : '';
-                          if (!localDate) {
-                            const today = new Date();
-                            const tzOffset = today.getTimezoneOffset() * 60000;
-                            localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
-                          }
-                          
-                          setNewSchedule({...newSchedule, scheduledAt: `${localDate}T${h.toString().padStart(2, '0')}:${m}`});
-                        }}
-                      />
-                      <span className="text-2xl font-bold text-muted-foreground/50">:</span>
-                      <ScrollDial 
-                        max={59} 
-                        value={newSchedule.scheduledAt ? parseInt(newSchedule.scheduledAt.split('T')[1]?.split(':')[1] || '0', 10) : 0}
-                        onChange={(m) => {
-                          let h = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[1]?.split(':')[0] : '12';
-                          if (!h) h = '12';
-                          
-                          let localDate = newSchedule.scheduledAt ? newSchedule.scheduledAt.split('T')[0] : '';
-                          if (!localDate) {
-                            const today = new Date();
-                            const tzOffset = today.getTimezoneOffset() * 60000;
-                            localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
-                          }
-                          
-                          setNewSchedule({...newSchedule, scheduledAt: `${localDate}T${h}:${m.toString().padStart(2, '0')}`});
-                        }}
-                      />
+                    <div className="space-y-2">
+                      <Label>Opções (Separadas por vírgula)</Label>
+                      <Input required placeholder="Manhã, Tarde, Noite" value={schedule.pollOptions} onChange={e => updateSchedule(index, { pollOptions: e.target.value })} />
                     </div>
                   </div>
-                </PopoverContent>
-              </Popover>
-            </div>
+                )}
+
+                <div className="space-y-2 pt-2 border-t border-border/50 flex flex-col">
+                  <Label>Data e Hora do Envio</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={"outline"}
+                        className={cn(
+                          "w-full justify-start text-left font-normal",
+                          !schedule.scheduledAt && "text-muted-foreground"
+                        )}
+                      >
+                        <CalendarDays className="mr-2 h-4 w-4" />
+                        {schedule.scheduledAt ? (
+                          new Date(schedule.scheduledAt).toLocaleString('pt-BR', { dateStyle: 'long', timeStyle: 'short' })
+                        ) : (
+                          <span>Escolha uma data e horário</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[95vw] sm:w-auto p-0 max-h-[85vh] overflow-y-auto rounded-xl" align="center">
+                      <Calendar
+                        mode="single"
+                        selected={schedule.scheduledAt ? new Date(schedule.scheduledAt) : undefined}
+                        onSelect={(d) => {
+                          if (d) {
+                             const current = schedule.scheduledAt ? new Date(schedule.scheduledAt) : new Date();
+                             d.setHours(current.getHours());
+                             d.setMinutes(current.getMinutes());
+                             const tzOffset = d.getTimezoneOffset() * 60000;
+                             const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+                             updateSchedule(index, { scheduledAt: localISOTime });
+                          }
+                        }}
+                      />
+                      <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-3 bg-muted/20">
+                        <Label className="text-sm font-semibold w-full text-center text-muted-foreground">Selecione o Horário</Label>
+                        <div className="flex items-center gap-4">
+                          <ScrollDial 
+                            max={23} 
+                            value={schedule.scheduledAt ? parseInt(schedule.scheduledAt.split('T')[1]?.split(':')[0] || '12', 10) : 12}
+                            onChange={(h) => {
+                              let m = schedule.scheduledAt ? schedule.scheduledAt.split('T')[1]?.split(':')[1] : '00';
+                              if (!m) m = '00';
+                              
+                              let localDate = schedule.scheduledAt ? schedule.scheduledAt.split('T')[0] : '';
+                              if (!localDate) {
+                                const today = new Date();
+                                const tzOffset = today.getTimezoneOffset() * 60000;
+                                localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
+                              }
+                              
+                              updateSchedule(index, { scheduledAt: `${localDate}T${h.toString().padStart(2, '0')}:${m}` });
+                            }}
+                          />
+                          <span className="text-2xl font-bold text-muted-foreground/50">:</span>
+                          <ScrollDial 
+                            max={59} 
+                            value={schedule.scheduledAt ? parseInt(schedule.scheduledAt.split('T')[1]?.split(':')[1] || '0', 10) : 0}
+                            onChange={(m) => {
+                              let h = schedule.scheduledAt ? schedule.scheduledAt.split('T')[1]?.split(':')[0] : '12';
+                              if (!h) h = '12';
+                              
+                              let localDate = schedule.scheduledAt ? schedule.scheduledAt.split('T')[0] : '';
+                              if (!localDate) {
+                                const today = new Date();
+                                const tzOffset = today.getTimezoneOffset() * 60000;
+                                localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
+                              }
+                              
+                              updateSchedule(index, { scheduledAt: `${localDate}T${h}:${m.toString().padStart(2, '0')}` });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+            ))}
+            
+            <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setNewSchedules([...newSchedules, getEmptySchedule()])}>
+              <Plus className="w-4 h-4 mr-2" /> Adicionar Outra Mensagem
+            </Button>
 
             <div className="space-y-2 pt-4 border-t border-border/50">
               <div className="flex items-center justify-between">
@@ -1060,8 +1088,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
 
             <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
               <Button type="button" variant="secondary" onClick={() => setIsMassCreateModalOpen(false)} className="w-full sm:w-auto" disabled={isCreating}>Cancelar</Button>
-              <Button type="submit" className="w-full sm:w-auto" disabled={!newSchedule.scheduledAt || selectedGroupsForCreate.length === 0 || isCreating}>
-                {isCreating ? 'Agendando...' : `Criar em ${selectedGroupsForCreate.length} grupo(s)`}
+              <Button type="submit" className="w-full sm:w-auto" disabled={selectedGroupsForCreate.length === 0 || isCreating}>
+                {isCreating ? 'Agendando...' : `Criar ${newSchedules.length} agendamento(s) em ${selectedGroupsForCreate.length} grupo(s)`}
               </Button>
             </DialogFooter>
           </form>
