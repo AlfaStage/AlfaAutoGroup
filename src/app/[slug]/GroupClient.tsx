@@ -126,6 +126,12 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
   const [activeTab, setActiveTab] = useState('details')
   const [contacts, setContacts] = useState<any[]>([])
   
+  // Filtros da Agenda
+  const [hideDeactivated, setHideDeactivated] = useState(false)
+  const [dateFilter, setDateFilter] = useState('all') // all, next24, next48, next7, next30, last24, last7, custom
+  const [customDateStart, setCustomDateStart] = useState('')
+  const [customDateEnd, setCustomDateEnd] = useState('')
+
   // Fetch contacts on mount to map names
   useEffect(() => {
     const fetchContacts = async () => {
@@ -562,9 +568,9 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
 
           {/* Tab: Agenda */}
           <TabsContent value="schedules" className="space-y-4 animate-in fade-in-50">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <h2 className="text-lg font-semibold">Agendamentos</h2>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" onClick={handleOpenCopyModal} title="Copiar Agendamentos pendentes">
                   <Copy className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Copiar</span>
                 </Button>
@@ -576,9 +582,77 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                 </Button>
               </div>
             </div>
+
+            {/* Filtros da Agenda */}
+            <Card className="border-border/50 bg-card/60 shadow-sm p-4">
+              <div className="flex flex-col md:flex-row items-start md:items-center gap-4 justify-between">
+                <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm font-medium">Período:</Label>
+                    <Select value={dateFilter} onValueChange={setDateFilter}>
+                      <SelectTrigger className="w-[180px] h-8 text-xs">
+                        <SelectValue placeholder="Filtrar por data..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as Datas</SelectItem>
+                        <SelectItem value="next24">Próximas 24h</SelectItem>
+                        <SelectItem value="next48">Próximos 2 dias</SelectItem>
+                        <SelectItem value="next7">Próximos 7 dias</SelectItem>
+                        <SelectItem value="next30">Próximo 1 mês</SelectItem>
+                        <SelectItem value="last24">Últimas 24h</SelectItem>
+                        <SelectItem value="last7">Última semana</SelectItem>
+                        <SelectItem value="custom">Intervalo Específico</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {dateFilter === 'custom' && (
+                    <div className="flex items-center gap-2">
+                      <Input type="date" className="h-8 text-xs w-[130px]" value={customDateStart} onChange={e => setCustomDateStart(e.target.value)} title="Data Inicial" />
+                      <span className="text-muted-foreground text-xs">até</span>
+                      <Input type="date" className="h-8 text-xs w-[130px]" value={customDateEnd} onChange={e => setCustomDateEnd(e.target.value)} title="Data Final" />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      checked={hideDeactivated}
+                      onChange={e => setHideDeactivated(e.target.checked)}
+                    />
+                    Ocultar Desativados
+                  </label>
+                </div>
+              </div>
+            </Card>
             
             <div className="space-y-3" ref={scrollRef}>
-              {schedules.map((s: any) => {
+              {schedules.filter((s: any) => {
+                if (hideDeactivated && s.status === 'deactivated') return false;
+                
+                if (dateFilter !== 'all') {
+                  const sDate = new Date(s.adjustedAt).getTime();
+                  const now = new Date().getTime();
+                  const ONE_DAY = 24 * 60 * 60 * 1000;
+                  
+                  if (dateFilter === 'next24' && (sDate < now || sDate > now + ONE_DAY)) return false;
+                  if (dateFilter === 'next48' && (sDate < now || sDate > now + 2 * ONE_DAY)) return false;
+                  if (dateFilter === 'next7' && (sDate < now || sDate > now + 7 * ONE_DAY)) return false;
+                  if (dateFilter === 'next30' && (sDate < now || sDate > now + 30 * ONE_DAY)) return false;
+                  if (dateFilter === 'last24' && (sDate > now || sDate < now - ONE_DAY)) return false;
+                  if (dateFilter === 'last7' && (sDate > now || sDate < now - 7 * ONE_DAY)) return false;
+                  
+                  if (dateFilter === 'custom') {
+                    if (customDateStart && sDate < new Date(customDateStart + 'T00:00:00').getTime()) return false;
+                    if (customDateEnd && sDate > new Date(customDateEnd + 'T23:59:59').getTime()) return false;
+                  }
+                }
+                
+                return true;
+              }).map((s: any) => {
                 const content = JSON.parse(s.content)
                 const isSent = s.status === 'sent'
                 const isDeactivated = s.status === 'deactivated'

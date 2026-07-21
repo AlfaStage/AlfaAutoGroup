@@ -541,6 +541,11 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
   const totalSchedules = filteredGroups.reduce((acc, g) => acc + (g._count?.schedules || 0), 0)
 
+  const totalSent = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'sent').length || 0), 0)
+  const totalPending = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'pending').length || 0), 0)
+  const totalError = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'error').length || 0), 0)
+  const totalDeactivated = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'deactivated').length || 0), 0)
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       
@@ -587,38 +592,49 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
         </CardContent>
       </Card>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="border-border/40 shadow-sm">
-          <CardContent className="p-6 flex items-center justify-between">
+      {/* Main Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="border-border/40 shadow-sm bg-green-500/5">
+          <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-muted-foreground">Total de Grupos</p>
-              <p className="text-3xl font-bold mt-1">{totalGroups}</p>
+              <p className="text-xs font-medium text-green-600/80 uppercase">Enviadas</p>
+              <p className="text-2xl font-bold mt-1 text-green-600">{totalSent}</p>
             </div>
-            <div className="p-3 bg-primary/10 rounded-full">
-              <Activity className="w-6 h-6 text-primary" />
+            <div className="p-2 bg-green-500/10 rounded-full">
+              <CheckCircle2 className="w-5 h-5 text-green-500" />
             </div>
           </CardContent>
         </Card>
-        <Card className="border-border/40 shadow-sm">
-          <CardContent className="p-6 flex items-center justify-between">
+        <Card className="border-border/40 shadow-sm bg-primary/5">
+          <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-muted-foreground">Membros Gerenciados</p>
-              <p className="text-3xl font-bold mt-1">{totalMembers}</p>
+              <p className="text-xs font-medium text-primary/80 uppercase">Pendentes</p>
+              <p className="text-2xl font-bold mt-1 text-primary">{totalPending}</p>
             </div>
-            <div className="p-3 bg-primary/10 rounded-full">
-              <Users className="w-6 h-6 text-primary" />
+            <div className="p-2 bg-primary/10 rounded-full">
+              <Clock className="w-5 h-5 text-primary" />
             </div>
           </CardContent>
         </Card>
-        <Card className="border-border/40 shadow-sm">
-          <CardContent className="p-6 flex items-center justify-between">
+        <Card className="border-border/40 shadow-sm bg-red-500/5">
+          <CardContent className="p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-muted-foreground">Agendamentos</p>
-              <p className="text-3xl font-bold mt-1">{totalSchedules}</p>
+              <p className="text-xs font-medium text-red-600/80 uppercase">Com Falha</p>
+              <p className="text-2xl font-bold mt-1 text-red-600">{totalError}</p>
             </div>
-            <div className="p-3 bg-primary/10 rounded-full">
-              <CalendarDays className="w-6 h-6 text-primary" />
+            <div className="p-2 bg-red-500/10 rounded-full">
+              <AlertCircle className="w-5 h-5 text-red-500" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-border/40 shadow-sm bg-muted/20">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase">Desativadas</p>
+              <p className="text-2xl font-bold mt-1 text-foreground">{totalDeactivated}</p>
+            </div>
+            <div className="p-2 bg-muted rounded-full">
+              <PowerOff className="w-5 h-5 text-muted-foreground" />
             </div>
           </CardContent>
         </Card>

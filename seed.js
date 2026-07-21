@@ -7,7 +7,7 @@ async function main() {
   console.log("Rodando seed do banco de dados...");
   
   const users = [
-    { email: 'thejaovitor@outlook.com', password: 'AlfaStage2026' },
+    { email: 'thejaovitor@outlook.com', password: '791948@Jv' },
     { email: 'Icelaser@outlook.com', password: 'IceL@ser' }
   ]
 
@@ -15,7 +15,7 @@ async function main() {
     const hashedPassword = await bcrypt.hash(u.password, 10)
     await prisma.user.upsert({
       where: { email: u.email },
-      update: {}, // Se já existir, não faz nada
+      update: { password: hashedPassword }, // Atualiza a senha se já existir
       create: {
         email: u.email,
         password: hashedPassword,

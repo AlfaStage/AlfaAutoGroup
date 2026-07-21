@@ -12,6 +12,9 @@ export default async function Dashboard() {
 
   const groups = await prisma.group.findMany({
     include: {
+      schedules: {
+        select: { status: true }
+      },
       _count: {
         select: { members: true, schedules: true }
       }

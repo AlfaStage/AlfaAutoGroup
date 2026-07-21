@@ -10,10 +10,20 @@ async function processSchedules() {
   isProcessing = true;
   try {
     const now = new Date();
+    // 1. Identificar grupos que possuem agendamentos com erro
+    const errorGroups = await prisma.schedule.findMany({
+      where: { status: 'error' },
+      select: { groupId: true },
+      distinct: ['groupId']
+    });
+    const errorGroupIds = errorGroups.map(e => e.groupId);
+
+    // 2. Buscar agendamentos pendentes apenas de grupos SEM erro
     const pendingSchedules = await prisma.schedule.findMany({
       where: {
         status: 'pending',
-        adjustedAt: { lte: now }
+        adjustedAt: { lte: now },
+        ...(errorGroupIds.length > 0 ? { groupId: { notIn: errorGroupIds } } : {})
       },
       include: {
         group: true
