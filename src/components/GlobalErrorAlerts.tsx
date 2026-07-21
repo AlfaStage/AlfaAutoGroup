@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Info, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+import Link from 'next/link'
+
 export function GlobalErrorAlerts() {
   const [errorGroups, setErrorGroups] = useState<any[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -129,20 +131,28 @@ export function GlobalErrorAlerts() {
                 Quando uma mensagem falha, o envio para aquele grupo é congelado para manter a ordem.
                 Resolva o problema (ex: reconecte o WhatsApp) e clique em <strong>Reativar</strong>. 
                 As mensagens pendentes serão empurradas para frente preservando os intervalos de tempo.
+                Você também pode ir no grupo para ignorar ou editar o erro.
               </p>
 
               {errorGroups.map(({ group, errors }) => (
                 <div key={group.id} className="border border-border/50 bg-muted/20 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3 border-b pb-2">
+                  <div className="flex items-center justify-between mb-3 border-b pb-2 flex-wrap gap-2">
                     <div className="font-semibold">{group.name}</div>
-                    <Button 
-                      size="sm" 
-                      onClick={() => handleResolve(group.id)}
-                      disabled={resolving === group.id}
-                    >
-                      {resolving === group.id ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
-                      Reativar / Aprovar
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Link href={`/${group.slug}?tab=schedules`}>
+                        <Button variant="outline" size="sm" onClick={() => setIsModalOpen(false)}>
+                          Ver Grupo
+                        </Button>
+                      </Link>
+                      <Button 
+                        size="sm" 
+                        onClick={() => handleResolve(group.id)}
+                        disabled={resolving === group.id}
+                      >
+                        {resolving === group.id ? <RefreshCw className="w-4 h-4 animate-spin mr-2" /> : null}
+                        Reativar / Aprovar
+                      </Button>
+                    </div>
                   </div>
                   
                   <div className="space-y-2">

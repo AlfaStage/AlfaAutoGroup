@@ -687,19 +687,19 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         {(isError || s.status === 'pending') && (
-                          <Button variant="outline" size="sm" onClick={() => handleSendNow(s.id)} className="text-primary hover:text-primary hover:bg-primary/10">
+                          <Button variant="outline" size="sm" onClick={() => handleSendNow(s.id)} className="text-primary hover:text-primary hover:bg-primary/10" title="Tentar reenviar imediatamente">
                             <Send className="w-4 h-4 mr-2" /> Enviar Agora
                           </Button>
                         )}
                         <Button variant="secondary" size="sm" onClick={() => setPreviewSchedule(s)}>
                           <Eye className="w-4 h-4 mr-2" /> Pré-visualizar
                         </Button>
-                        {s.status === 'pending' && (
+                        {(s.status === 'pending' || isError) && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => openEditModal(s)}>
+                            <Button variant="outline" size="sm" onClick={() => openEditModal(s)} title="Editar agendamento">
                               <Edit className="w-4 h-4" />
                             </Button>
-                            <Button variant="destructive" size="sm" onClick={() => handleDeactivate(s.id)}>
+                            <Button variant="destructive" size="sm" onClick={() => handleDeactivate(s.id)} title="Ignorar erro e Desativar">
                               <PowerOff className="w-4 h-4" />
                             </Button>
                           </>
