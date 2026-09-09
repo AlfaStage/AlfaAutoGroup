@@ -1,0 +1,149 @@
+# Stack enxuto para VM de 1 GB: Caddy -> Next.js (standalone) + worker + Evolution GO + Postgres
+x-app-env: &app-env
+  TZ: America/Sao_Paulo
+  DATABASE_URL: file:/app/prisma/dev.db
+  EVOLUTION_API_URL: http://evolution-go:8080
+  EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+  NEXTAUTH_URL: ${NEXTAUTH_URL}
+  AI_API_KEY: ${AI_API_KEY}
+
+x-app-build: &app-build
+  context: ..
+  dockerfile: deploy/Dockerfile.optimized
+  args:
+    AI_API_KEY: ${AI_API_KEY}
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - evolution-go
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 224m
+    shm_size: 64m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=48MB
+      - -c
+      - max_connections=25
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - synchronous_commit=off
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: America/Sao_Paulo
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init-evogo-dbs.sh:/docker-entrypoint-initdb.d/init-evogo-dbs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  evolution-go:
+    image: evoapicloud/evolution-go:latest
+    restart: unless-stopped
+    mem_limit: 288m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      POSTGRES_AUTH_DB: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/evogo_auth?sslmode=disable
+      POSTGRES_USERS_DB: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/evogo_users?sslmode=disable
+      GLOBAL_API_KEY: ${EVOLUTION_API_KEY}
+      CLIENT_NAME: evolution
+      OS_NAME: Evolution GO
+      DATABASE_SAVE_MESSAGES: "false"
+      CONNECT_ON_STARTUP: "true"
+      WEBHOOK_FILES: "true"
+      WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL}
+      MINIO_ENABLED: "false"
+      AMQP_GLOBAL_ENABLED: "false"
+      LOGTYPE: console
+      WADEBUG: WARN
+      GIN_MODE: release
+      TZ: America/Sao_Paulo
+    volumes:
+      - evolution_data:/app/data
+
+  # Roda uma vez: prepara o SQLite e o usuario admin, depois sai.
+  init:
+    build: *app-build
+    image: alfaaltogrup:latest
+    restart: "no"
+    user: app
+    environment: *app-env
+    command: >
+      sh -c "cp /app/schema.prisma.new /app/prisma/schema.prisma &&
+             npx prisma db push --accept-data-loss --skip-generate &&
+             node seed.js"
+    volumes:
+      - sqlite_data:/app/prisma
+      - uploads_data:/app/uploads
+
+  web:
+    build: *app-build
+    image: alfaaltogrup:latest
+    restart: unless-stopped
+    mem_limit: 320m
+    environment:
+      <<: *app-env
+      NODE_OPTIONS: --max-old-space-size=224
+    volumes:
+      - sqlite_data:/app/prisma
+      - uploads_data:/app/uploads
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  worker:
+    build: *app-build
+    image: alfaaltogrup:latest
+    restart: unless-stopped
+    mem_limit: 192m
+    command: ["node", "worker.js"]
+    environment:
+      <<: *app-env
+      NODE_OPTIONS: --max-old-space-size=128
+    volumes:
+      - sqlite_data:/app/prisma
+      - uploads_data:/app/uploads
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pg_data:
+  evolution_data:
+  sqlite_data:
+  uploads_data:
