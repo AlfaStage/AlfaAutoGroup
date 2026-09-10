@@ -36,18 +36,20 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    mem_limit: 224m
+    mem_limit: 352m
     shm_size: 64m
     command:
       - postgres
       - -c
       - shared_buffers=48MB
       - -c
-      - max_connections=25
+      - max_connections=120
       - -c
       - effective_cache_size=128MB
       - -c
-      - work_mem=2MB
+      - work_mem=1MB
+      - -c
+      - superuser_reserved_connections=5
       - -c
       - maintenance_work_mem=32MB
       - -c
@@ -70,7 +72,7 @@ services:
   evolution-go:
     image: evoapicloud/evolution-go:latest
     restart: unless-stopped
-    mem_limit: 288m
+    mem_limit: 640m
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,7 +85,7 @@ services:
       OS_NAME: Evolution GO
       DATABASE_SAVE_MESSAGES: "false"
       CONNECT_ON_STARTUP: "true"
-      WEBHOOK_FILES: "true"
+      WEBHOOK_FILES: "false"
       WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL}
       MINIO_ENABLED: "false"
       AMQP_GLOBAL_ENABLED: "false"
@@ -113,7 +115,7 @@ services:
     build: *app-build
     image: alfaaltogrup:latest
     restart: unless-stopped
-    mem_limit: 320m
+    mem_limit: 256m
     environment:
       <<: *app-env
       NODE_OPTIONS: --max-old-space-size=224

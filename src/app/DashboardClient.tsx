@@ -228,7 +228,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
 
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    // 30s: a 5s o polling empilhava chamadas na Evolution e derrubava o keepalive
+    const interval = setInterval(checkStatus, 30000);
     return () => clearInterval(interval);
   }, [selectedInstance, instances])
 
