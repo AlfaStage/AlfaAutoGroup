@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isAuthenticated } from '@/lib/auth'
+import { validateScheduleContent, isGroupActionType } from '@/lib/schedule-types'
+import { aplicarRastreio } from '@/lib/tracked-links'
 
 /**
  * @swagger
@@ -74,7 +76,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'É necessário informar groupId ou groupIds' }, { status: 400 })
     }
 
+    const problema = validateScheduleContent(type, content)
+    if (problema) {
+      return NextResponse.json({ error: problema }, { status: 400 })
+    }
+
     const requestedTime = new Date(scheduledAt)
+    if (isNaN(requestedTime.getTime())) {
+      return NextResponse.json({ error: 'scheduledAt inválido' }, { status: 400 })
+    }
+
+    // Mudancas de grupo (permissao/perfil) nao sofrem o jitter anti-ban:
+    // "abrir o grupo as 8h" precisa acontecer as 8h, nao 40s depois.
+    const acaoDeGrupo = isGroupActionType(type)
+
+    // Encurta e passa a contar os links marcados para rastreio. Acontece aqui
+    // para o codigo curto ja existir quando a mensagem for enviada.
+    const host = request.headers.get('host')
+    const proto = request.headers.get('x-forwarded-proto') || 'http'
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (host ? proto + '://' + host : '')
+
     const createdSchedules = []
 
     for (const gid of groupsToSchedule) {
@@ -82,7 +103,7 @@ export async function POST(request: Request) {
       const oneMinBefore = new Date(adjustedAt.getTime() - 60000)
       const oneMinAfter = new Date(adjustedAt.getTime() + 60000)
 
-      const conflicts = await prisma.schedule.findMany({
+      const conflicts = acaoDeGrupo ? [] : await prisma.schedule.findMany({
         where: {
           status: 'pending',
           adjustedAt: {
@@ -93,17 +114,20 @@ export async function POST(request: Request) {
         orderBy: { adjustedAt: 'desc' }
       })
 
-      if (conflicts.length > 0) {
+      if (!acaoDeGrupo && conflicts.length > 0) {
         const latestConflict = conflicts[0].adjustedAt
         const randomDelay = Math.floor(Math.random() * (60 - 15 + 1)) + 15
         adjustedAt = new Date(latestConflict.getTime() + (randomDelay * 1000))
       }
 
+      // Cada grupo ganha os proprios codigos, para o clique dizer de onde veio.
+      const rastreado = await aplicarRastreio(type, content, baseUrl, gid)
+
       const schedule = await prisma.schedule.create({
         data: {
           groupId: gid,
           type,
-          content: JSON.stringify(content),
+          content: JSON.stringify(rastreado.content),
           scheduledAt: requestedTime,
           adjustedAt,
           status: 'pending'
@@ -113,7 +137,7 @@ export async function POST(request: Request) {
       
       // Update requestedTime slightly for the next iteration to simulate base shift
       // Just so it stacks delays correctly for huge arrays
-      if (groupsToSchedule.length > 1) {
+      if (!acaoDeGrupo && groupsToSchedule.length > 1) {
           requestedTime.setTime(adjustedAt.getTime());
       }
     }

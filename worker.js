@@ -1,9 +1,107 @@
 const { PrismaClient } = require('@prisma/client');
+const { runGroupTask } = require('./shared/group-tasks');
 const prisma = new PrismaClient();
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
 let isProcessing = false;
+
+/** Recorte do estado do grupo que vale a pena guardar no historico. */
+function snapshotTexto(st) {
+  if (!st) return null;
+  return {
+    name: st.name || '',
+    topic: st.topic || '',
+    isAnnounce: Boolean(st.isAnnounce),
+    isLocked: Boolean(st.isLocked),
+    isApprovalRequired: Boolean(st.isApprovalRequired),
+    adminOnlyAdd: Boolean(st.adminOnlyAdd)
+  };
+}
+
+// Espera crescente entre tentativas: 2min, 10min, 30min.
+const TASK_BACKOFF_MIN = [2, 10, 30];
+const TASK_MAX_ATTEMPTS = 3;
+
+/**
+ * Executa um agendamento de mudanca de grupo (permissao ou perfil).
+ * O runGroupTask le o estado atual antes de aplicar: se o grupo ja estiver
+ * como pedido, nada e enviado ao WhatsApp e o agendamento fecha como
+ * "skipped". Depois de aplicar, ele relê para confirmar que pegou.
+ */
+async function runGroupSchedule(schedule, content) {
+  const attempt = (schedule.attempts || 0) + 1;
+
+  let result;
+  try {
+    result = await runGroupTask({
+      group: schedule.group,
+      kind: schedule.type,
+      payload: content,
+      baseUrl: process.env.NEXT_PUBLIC_APP_URL || ''
+    });
+  } catch (e) {
+    result = { status: 'error', message: String((e && e.message) || e) };
+  }
+
+  // Falha transitoria: reagenda em vez de dar o agendamento por perdido.
+  if (result.status === 'error' && attempt < TASK_MAX_ATTEMPTS) {
+    const minutos = TASK_BACKOFF_MIN[attempt - 1] || 30;
+    await prisma.schedule.update({
+      where: { id: schedule.id },
+      data: {
+        status: 'pending',
+        attempts: attempt,
+        adjustedAt: new Date(Date.now() + minutos * 60 * 1000),
+        errorMessage: `tentativa ${attempt}: ${result.message}`
+      }
+    });
+    console.log(`[Worker] Agendamento ${schedule.id} falhou (${result.message}). Nova tentativa em ${minutos}min.`);
+    return;
+  }
+
+  await prisma.schedule.update({
+    where: { id: schedule.id },
+    data: {
+      status: result.status === 'done' ? 'sent' : result.status, // sent | skipped | error
+      attempts: attempt,
+      appliedInfo: JSON.stringify({
+        applied: result.applied || [],
+        alreadyOk: result.alreadyOk || [],
+        message: result.message || '',
+        // Antes/depois para o painel mostrar o que mudou de fato.
+        // A foto nao entra: so guardamos texto.
+        before: snapshotTexto(result.stateBefore),
+        after: snapshotTexto(result.groupData)
+      }),
+      skipReason: result.status === 'skipped' ? result.message : null,
+      errorMessage: result.status === 'error' ? result.message : null
+    }
+  });
+
+  // Espelha no banco local o estado que a Evolution confirmou.
+  if (result.groupData) {
+    try {
+      await prisma.group.update({
+        where: { id: schedule.groupId },
+        data: {
+          isAnnounce: Boolean(result.groupData.isAnnounce),
+          isLocked: Boolean(result.groupData.isLocked),
+          isApprovalRequired: Boolean(result.groupData.isApprovalRequired),
+          adminOnlyAdd: Boolean(result.groupData.adminOnlyAdd),
+          ...(result.groupData.name ? { name: result.groupData.name } : {}),
+          ...(typeof result.groupData.topic === 'string'
+            ? { topic: result.groupData.topic, description: result.groupData.topic }
+            : {})
+        }
+      });
+    } catch (e) {
+      console.error('[Worker] Falha ao espelhar estado do grupo', e);
+    }
+  }
+
+  console.log(`[Worker] Agendamento ${schedule.id} (${schedule.type}) -> ${result.status}: ${result.message}`);
+}
 
 async function processSchedules() {
   if (isProcessing) return;
@@ -70,16 +168,24 @@ async function processSchedules() {
         continue;
       }
 
+      const content = JSON.parse(schedule.content);
+
+      // Permissao e perfil nao sao mensagens: vao para o executor de grupo,
+      // que confere o estado atual antes de mexer em qualquer coisa.
+      if (schedule.type === 'permission' || schedule.type === 'profile') {
+        await runGroupSchedule(schedule, content);
+        continue;
+      }
+
       let endpoint = '';
       let payload = {};
-
-      const content = JSON.parse(schedule.content);
 
       if (schedule.type === 'text') {
         endpoint = `/send/text`;
         payload = {
           number: evolutionGroupId,
           text: content.text,
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       } else if (schedule.type === 'media') {
@@ -90,6 +196,7 @@ async function processSchedules() {
           caption: content.caption || '',
           url: content.media,
           filename: content.fileName || 'file.mp4',
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       } else if (schedule.type === 'button') {
@@ -113,6 +220,7 @@ async function processSchedules() {
 
         payload = {
           number: evolutionGroupId,
+          mentionAll: Boolean(content.mentionAll),
           title: content.title || 'Opção',
           description: content.description || 'Escolha uma opção',
           footer: content.footer || 'Rodapé',
@@ -143,6 +251,7 @@ async function processSchedules() {
           question: content.name || 'Enquete',
           maxAnswer: parseInt(content.selectableCount, 10) || 1,
           options: pollOptions,
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       }

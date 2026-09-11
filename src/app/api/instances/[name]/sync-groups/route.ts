@@ -1,17 +1,51 @@
 import { NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { isAuthenticated } from '@/lib/auth';
+import {
+  getInstanceToken,
+  evolutionCall,
+  fetchAvatarUrl,
+  normalizePhone,
+  participantPhone,
+  participantLid
+} from '@/lib/evolution';
+import { writeFile, mkdir } from 'fs/promises';
+import { join } from 'path';
 
 const prisma = new PrismaClient();
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
+
+// A URL de foto do WhatsApp expira, então guardamos o arquivo e só
+// atualizamos de tempos em tempos — evita 25 downloads a cada sincronização.
+const PICTURE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function cacheGroupPicture(token: string, jid: string): Promise<string | null> {
+  const url = await fetchAvatarUrl(token, jid);
+  if (!url) return null;
+
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    const uploadsDir = join(process.cwd(), 'uploads');
+    await mkdir(uploadsDir, { recursive: true });
+
+    const filename = `group-${jid.replace(/[^a-zA-Z0-9]/g, '')}.jpg`;
+    await writeFile(join(uploadsDir, filename), buffer);
+
+    return `/api/uploads/${filename}`;
+  } catch (e) {
+    console.error(`[sync] falha ao baixar foto de ${jid}`, e);
+    return null;
+  }
+}
 
 /**
  * @swagger
  * /api/instances/{name}/sync-groups:
  *   post:
  *     summary: Sincroniza os grupos da instância
- *     description: Busca os grupos no WhatsApp e atualiza no banco de dados local.
+ *     description: Busca os grupos no WhatsApp e atualiza no banco de dados local, incluindo membros, permissões e fotos.
  *     security:
  *       - ApiKeyAuth: []
  *     parameters:
@@ -24,10 +58,10 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
  *     responses:
  *       200:
  *         description: Grupos sincronizados com sucesso.
- *       400:
- *         description: Token ausente.
  *       401:
  *         description: Não autorizado.
+ *       404:
+ *         description: Instância não encontrada.
  *       500:
  *         description: Falha ao sincronizar.
  */
@@ -36,99 +70,121 @@ export async function POST(
   { params }: { params: Promise<{ name: string }> }
 ) {
   try {
-    if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!(await isAuthenticated(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const { name: instanceName } = await params;
-    const token = request.headers.get('x-instance-token') || EVOLUTION_API_KEY;
 
-    if (!token || !EVOLUTION_API_URL) {
-      return NextResponse.json({ error: 'Missing token or API URL' }, { status: 400 });
+    const token = request.headers.get('x-instance-token')
+      || await getInstanceToken(instanceName);
+
+    if (!token) {
+      return NextResponse.json(
+        { error: `Instância "${instanceName}" não encontrada na Evolution API` },
+        { status: 404 }
+      );
     }
 
-    // 1. Fetch groups from Evolution GO
-    const groupsRes = await fetch(`${EVOLUTION_API_URL}/group/list?instanceName=${instanceName}`, {
-      headers: { 'apikey': token }
-    });
-
-    if (!groupsRes.ok) {
-      return NextResponse.json({ error: 'Failed to fetch groups from Evolution' }, { status: groupsRes.status });
+    const listed = await evolutionCall('/group/list', { token });
+    if (!listed.ok) {
+      return NextResponse.json(
+        { error: 'Failed to fetch groups from Evolution', details: listed.text },
+        { status: listed.status }
+      );
     }
 
-    const groupsData = await groupsRes.json();
-    const fetchedGroups = Array.isArray(groupsData) ? groupsData : (groupsData.data || []);
+    const body: any = listed.data;
+    const fetchedGroups: any[] = Array.isArray(body) ? body : (body?.data || []);
 
-    // 2. Synchronize Database
+    let picturesUpdated = 0;
+    let membersSynced = 0;
+
     for (const g of fetchedGroups) {
-      const evolutionGroupId = g.id || g.jid || g.JID;
-      const subject = g.subject || g.name || g.Name;
+      const evolutionGroupId = g.JID || g.jid || g.id;
+      const subject = g.Name || g.name || g.subject;
       if (!evolutionGroupId || !subject) continue;
 
-      const group = await prisma.group.upsert({
-        where: { 
-          instanceName_evolutionGroupId: {
-            instanceName: instanceName,
-            evolutionGroupId: evolutionGroupId
-          }
-        },
-        update: {
-          name: subject,
-          description: g.desc || g.Description || '',
-          instanceName: instanceName
-        },
-        create: {
-          evolutionGroupId: evolutionGroupId,
-          name: subject,
-          description: g.desc || g.Description || '',
-          slug: evolutionGroupId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15) + Math.floor(Math.random() * 1000),
-          instanceName: instanceName
+      const existing = await prisma.group.findUnique({
+        where: {
+          instanceName_evolutionGroupId: { instanceName, evolutionGroupId }
         }
       });
 
-      // Synchronize members
-      const participants = g.participants || g.Participants || [];
+      // Campos que a Evolution já devolve em /group/list e que o painel ignorava.
+      const commonData = {
+        name: subject,
+        description: g.Topic || g.desc || g.Description || '',
+        topic: g.Topic || '',
+        instanceName,
+        participantCount: Number(g.ParticipantCount || (g.Participants?.length ?? 0)) || 0,
+        isAnnounce: Boolean(g.IsAnnounce),
+        isLocked: Boolean(g.IsLocked),
+        isApprovalRequired: Boolean(g.IsJoinApprovalRequired),
+        adminOnlyAdd: String(g.MemberAddMode || '').toLowerCase() === 'admin_add',
+        ownerPhone: normalizePhone(g.OwnerPN || g.OwnerJID)
+      };
+
+      const group = await prisma.group.upsert({
+        where: {
+          instanceName_evolutionGroupId: { instanceName, evolutionGroupId }
+        },
+        update: commonData,
+        create: {
+          ...commonData,
+          evolutionGroupId,
+          slug: evolutionGroupId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15)
+            + Math.floor(Math.random() * 1000)
+        }
+      });
+
+      // Foto: só busca se ainda não temos ou se já passou do prazo.
+      const pictureStale = !existing?.picture
+        || !existing?.pictureUpdatedAt
+        || Date.now() - new Date(existing.pictureUpdatedAt).getTime() > PICTURE_TTL_MS;
+
+      if (pictureStale) {
+        const picture = await cacheGroupPicture(token, evolutionGroupId);
+        if (picture) {
+          await prisma.group.update({
+            where: { id: group.id },
+            data: { picture, pictureUpdatedAt: new Date() }
+          });
+          picturesUpdated++;
+        }
+        // Respira entre downloads para não sobrecarregar a instância.
+        await new Promise(r => setTimeout(r, 150));
+      }
+
+      const participants = g.Participants || g.participants || [];
       if (Array.isArray(participants) && participants.length > 0) {
-        // Delete old members for this group to avoid duplicates
-        await prisma.groupMember.deleteMany({
-          where: { groupId: group.id }
+        await prisma.groupMember.deleteMany({ where: { groupId: group.id } });
+
+        const membersData = participants.map((p: any) => {
+          const isAdmin = Boolean(p.IsAdmin || p.isAdmin || p.admin);
+          const isSuperAdmin = Boolean(p.IsSuperAdmin || p.isSuperAdmin);
+          return {
+            groupId: group.id,
+            phone: participantPhone(p) || 'desconhecido',
+            lid: participantLid(p) || null,
+            displayName: p.DisplayName || p.displayName || null,
+            isAdmin: isAdmin || isSuperAdmin,
+            isSuperAdmin,
+            role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant'
+          };
         });
 
-        // Insert new members
-        const membersData = participants.map((p: any) => ({
-          groupId: group.id,
-          phone: p.id || p.jid || p.JID || p.PhoneNumber || 'unknown',
-          role: p.admin || p.isAdmin || p.IsAdmin ? 'admin' : 'participant'
-        }));
-
-        await prisma.groupMember.createMany({
-          data: membersData
-        });
+        await prisma.groupMember.createMany({ data: membersData });
+        membersSynced += membersData.length;
       }
     }
 
-    // 3. Configurar Webhook apenas se estiver em produção
-    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_APP_URL) {
-      try {
-        const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook`;
-        
-        await fetch(`${EVOLUTION_API_URL}/instance/connect`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': EVOLUTION_API_KEY || token
-          },
-          body: JSON.stringify({
-            instanceName: instanceName,
-            webhookUrl: webhookUrl,
-            subscribe: ["MESSAGE"],
-            immediate: true
-          })
-        });
-      } catch (e) {
-        console.error(`Error configuring webhook for ${instanceName}`, e);
-      }
-    }
-
-    return NextResponse.json({ success: true, count: fetchedGroups.length });
+    return NextResponse.json({
+      success: true,
+      count: fetchedGroups.length,
+      picturesUpdated,
+      membersSynced
+    });
   } catch (error) {
     console.error('Sync Groups Error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

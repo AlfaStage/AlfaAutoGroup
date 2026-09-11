@@ -46,6 +46,8 @@ COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
 
 COPY --from=builder /app/prisma/schema.prisma ./schema.prisma.new
 COPY --from=builder /app/worker.js /app/seed.js ./
+# Executor compartilhado entre as rotas do Next e o worker
+COPY --from=builder /app/shared ./shared
 
 RUN mkdir -p /app/prisma /app/uploads && chown -R app:app /app
 USER app

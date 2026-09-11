@@ -13,7 +13,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { cn } from '@/lib/utils'
-import { ArrowLeft, UserCircle2, Settings, MessageSquare, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
+import GroupEditorModal from './GroupEditorModal'
+import ScheduleSummary from './ScheduleSummary'
+import { PERMISSION_GROUPS, PERMISSION_LABEL, actionsToPermissions, validateButtons } from '@/lib/schedule-types'
+import { ArrowLeft, UserCircle2, Settings, MessageSquare, Lock, Unlock, ShieldCheck, UserPlus, Loader2, Megaphone, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
 
 const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
   const [offset, setOffset] = useState(value * 40);
@@ -169,32 +172,80 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }] as any[],
     pollName: '',
     pollOptions: 'Opção 1, Opção 2',
+    // marca todos os participantes sem citar numero no texto
+    mentionAll: false,
+    // encurta os links do texto/legenda e conta os cliques
+    trackLinks: false,
+    // permissao: um alvo por par (fala, edicao, adicao, aprovacao)
+    permissions: {} as Record<string, string>,
+    // perfil: so os campos preenchidos entram no agendamento
+    profileName: '',
+    profileDescription: '',
+    profilePicture: '',
     scheduledAt: '' 
   })
   
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Polling for new messages
-  useEffect(() => {
-    if (activeTab !== 'messages') return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/groups/${initialGroup.id}/messages`);
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data);
-        }
-      } catch (e) {}
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [activeTab, initialGroup.id]);
+  // Permissões do grupo (POST /group/settings na Evolution GO)
+  const [perms, setPerms] = useState({
+    isAnnounce: Boolean(initialGroup.isAnnounce),
+    isLocked: Boolean(initialGroup.isLocked),
+    isApprovalRequired: Boolean(initialGroup.isApprovalRequired),
+    adminOnlyAdd: Boolean(initialGroup.adminOnlyAdd)
+  })
+  const [savingPerm, setSavingPerm] = useState<string | null>(null)
+
+  const applyPermission = async (key: keyof typeof perms, action: string) => {
+    setSavingPerm(key)
+    try {
+      const res = await fetch(`/api/groups/${initialGroup.id}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      })
+      const data = await res.json()
+      if (res.ok && data.group) {
+        setPerms(data.group)
+      } else {
+        alert(data.error || 'Não foi possível alterar a permissão.')
+      }
+    } catch (e) {
+      alert('Erro de conexão ao alterar a permissão.')
+    } finally {
+      setSavingPerm(null)
+    }
+  }
+
+  // Chat ao vivo desativado: o polling de 5s e a assinatura de eventos da
+  // Evolution custavam mais recurso do que a funcionalidade entregava.
+
+  // Regras de combinacao de botoes da Evolution: bloqueiam o agendamento
+  // antes de salvar, em vez de falhar so na hora do envio.
+  const erroBotoes = newSchedule.type === 'button'
+    ? validateButtons(newSchedule.buttonsList)
+    : ''
+
+  // O WhatsApp vem recusando botoes de resposta rapida em contas comuns
+  // (erro 405 no envio). Botoes de link, copiar e ligar passam normalmente.
+  const usaReply = newSchedule.type === 'button'
+    && newSchedule.buttonsList.some((b: any) => (b.type || 'reply') === 'reply')
+
+  // O worker congela a fila de um grupo enquanto houver agendamento com erro.
+  const temErro = schedules.some((s: any) => s.status === 'error')
+  const pendentesTravados = temErro
+    ? schedules.filter((s: any) => s.status === 'pending').length
+    : 0
 
   const openNewModal = () => {
     setEditingId(null)
     setNewSchedule({ 
       type: 'text', text: '', mediaUrl: '', mediatype: 'image', caption: '', fileName: '',
       title: '', description: '', footer: '', buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
-      pollName: '', pollOptions: 'Opção 1, Opção 2', scheduledAt: '' 
+      pollName: '', pollOptions: 'Opção 1, Opção 2',
+      mentionAll: false, trackLinks: false,
+      permissions: {}, profileName: '', profileDescription: '', profilePicture: '',
+      scheduledAt: ''
     })
     setIsModalOpen(true)
   }
@@ -219,6 +270,14 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
       buttonsList: content.buttons || [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
       pollName: content.name || '',
       pollOptions: content.values ? content.values.join(', ') : '',
+      mentionAll: Boolean(content.mentionAll),
+      trackLinks: Boolean(content.trackLinks),
+      permissions: schedule.type === 'permission'
+        ? actionsToPermissions(content.actions || (content.action ? [content.action] : []))
+        : {},
+      profileName: schedule.type === 'profile' ? (content.name || '') : '',
+      profileDescription: schedule.type === 'profile' ? (content.description ?? '') : '',
+      profilePicture: schedule.type === 'profile' ? (content.picture || '') : '',
       scheduledAt: localISOTime
     })
     setIsModalOpen(true)
@@ -226,6 +285,12 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
 
   const handleSaveSchedule = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (newSchedule.type === 'button') {
+      const problema = validateButtons(newSchedule.buttonsList)
+      if (problema) { alert(problema); return }
+    }
+
     let content: any = {}
     
     if (newSchedule.type === 'text') {
@@ -252,6 +317,14 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
           content.imageUrl = newSchedule.mediaUrl
         }
       }
+    } else if (newSchedule.type === 'permission') {
+      content = { actions: Object.values(newSchedule.permissions).filter(Boolean) }
+    } else if (newSchedule.type === 'profile') {
+      // Só os campos preenchidos viajam: o resto do grupo fica intocado.
+      content = {}
+      if (newSchedule.profileName.trim()) content.name = newSchedule.profileName.trim()
+      if (newSchedule.profileDescription.trim()) content.description = newSchedule.profileDescription
+      if (newSchedule.profilePicture.trim()) content.picture = newSchedule.profilePicture.trim()
     } else if (newSchedule.type === 'poll') {
       const opts = newSchedule.pollOptions.split(',').map(o => o.trim()).filter(Boolean);
       content = {
@@ -259,6 +332,16 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
         selectableCount: 1,
         values: opts
       }
+    }
+
+    // Marcar todos vale para os quatro tipos de mensagem.
+    if (['text', 'media', 'button', 'poll'].includes(newSchedule.type) && newSchedule.mentionAll) {
+      content.mentionAll = true
+    }
+
+    // O servidor troca os links por versões curtas na hora de agendar.
+    if (['text', 'media'].includes(newSchedule.type) && newSchedule.trackLinks) {
+      content.trackLinks = true
     }
 
     const payload = {
@@ -438,29 +521,21 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     }
   }
   
-  const handleUpdateGroup = async (action: 'picture' | 'description') => {
-    const value = prompt(`Nova ${action === 'picture' ? 'URL da foto (ou base64)' : 'descrição'}:`);
-    if (!value) return;
-    
-    try {
-      const res = await fetch(`/api/groups/${initialGroup.id}/action`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, value })
-      })
-      if (res.ok) {
-        alert("Atualizado com sucesso!");
-        window.location.reload();
-      } else {
-        alert("Erro ao atualizar.");
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
+  const [editorAberto, setEditorAberto] = useState(false)
 
   return (
     <div className="min-h-screen bg-background">
+      <GroupEditorModal
+        open={editorAberto}
+        onOpenChange={setEditorAberto}
+        groupId={initialGroup.id}
+        instanceName={initialGroup.instanceName}
+        evolutionGroupId={initialGroup.evolutionGroupId}
+        currentName={initialGroup.name}
+        currentDescription={initialGroup.description || ''}
+        currentPicture={initialGroup.picture}
+      />
+
       {/* Header Profile */}
       <div className="bg-card/30 border-b border-border/40 backdrop-blur-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -473,7 +548,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
             <div className="flex items-center gap-3">
               <div className="relative w-10 h-10">
                 <img 
-                  src={`/api/instances/${initialGroup.instanceName}/avatar?jid=${initialGroup.evolutionGroupId}`}
+                  src={initialGroup.picture || `/api/instances/${initialGroup.instanceName}/avatar?jid=${initialGroup.evolutionGroupId}`}
                   alt={initialGroup.name} 
                   className="w-10 h-10 rounded-full object-cover ring-2 ring-primary/20 absolute top-0 left-0"
                   onError={(e) => {
@@ -493,11 +568,8 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
             </div>
           </div>
           <div className="flex gap-1 sm:gap-2">
-            <Button variant="outline" size="sm" onClick={() => handleUpdateGroup('picture')} className="px-2 sm:px-3" title="Alterar Foto">
-              <ImageIcon className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Foto</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => handleUpdateGroup('description')} className="px-2 sm:px-3" title="Alterar Descrição">
-              <Edit3 className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Desc.</span>
+            <Button variant="outline" size="sm" onClick={() => setEditorAberto(true)} className="px-2 sm:px-3" title="Editar nome, descrição e foto">
+              <Edit3 className="w-4 h-4 sm:mr-2" /> <span className="hidden sm:inline">Editar grupo</span>
             </Button>
           </div>
         </div>
@@ -508,7 +580,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
           <TabsList className="grid w-full grid-cols-3 lg:w-[400px] h-auto p-1 gap-1">
             <TabsTrigger value="details" className="text-[11px] sm:text-sm py-2 whitespace-normal h-auto leading-tight">Detalhes</TabsTrigger>
             <TabsTrigger value="schedules" className="text-[11px] sm:text-sm py-2 whitespace-normal h-auto leading-tight">Agenda</TabsTrigger>
-            <TabsTrigger value="messages" className="text-[11px] sm:text-sm py-2 whitespace-normal h-auto leading-tight">Chat Ao Vivo</TabsTrigger>
+            <TabsTrigger value="permissions" className="text-[11px] sm:text-sm py-2 whitespace-normal h-auto leading-tight">Permissões</TabsTrigger>
           </TabsList>
 
           {/* Tab: Detalhes */}
@@ -523,14 +595,15 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                   <h3 className="font-semibold text-sm">Lista de Membros</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {initialGroup.members?.map((m: any) => {
-                      const formattedPhone = m.phone.replace('@s.whatsapp.net', '').replace('@lid', '');
-                      const isHidden = m.phone.includes('@lid');
-                      const contactInfo = contacts.find(c => c.Jid === m.phone || c.id === m.phone);
-                      
-                      let displayName = contactInfo?.FullName || contactInfo?.PushName || '';
-                      if (!displayName) {
-                        displayName = isHidden ? `Oculto (${formattedPhone}@lid)` : `+${formattedPhone}`;
-                      }
+                      // O sync agora grava o numero real (Participants[].PhoneNumber).
+                      // So resta oculto quem o WhatsApp nao revela mesmo.
+                      const formattedPhone = m.phone || '';
+                      const isHidden = !formattedPhone || formattedPhone === 'desconhecido';
+                      const contactInfo = contacts.find(c => c.Jid?.startsWith(formattedPhone) || c.id?.startsWith(formattedPhone));
+
+                      const contactName = m.displayName || contactInfo?.FullName || contactInfo?.PushName || '';
+                      const displayName = contactName
+                        || (isHidden ? 'Numero oculto' : `+${formattedPhone}`);
                       
                       return (
                         <div key={m.id} className="flex items-center gap-3 p-3 rounded-xl border border-border/50 bg-muted/20 hover:bg-muted/40 transition-colors">
@@ -554,7 +627,8 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                               {displayName}
                             </p>
                             <p className={`text-xs ${m.role === 'admin' ? 'text-green-500 font-medium' : 'text-muted-foreground'}`}>
-                              {m.role === 'admin' ? 'Administrador' : 'Membro'}
+                              {m.isSuperAdmin ? 'Dono' : m.role === 'admin' ? 'Administrador' : 'Membro'}
+                              {contactName && !isHidden ? ` · +${formattedPhone}` : ''}
                             </p>
                           </div>
                         </div>
@@ -629,6 +703,21 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
               </div>
             </Card>
             
+            {temErro && pendentesTravados > 0 && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-red-500">Fila deste grupo está parada</p>
+                  <p className="text-muted-foreground mt-1">
+                    Há agendamento com erro neste grupo, e o sistema segura todos os{' '}
+                    {pendentesTravados} agendamento(s) pendentes até que ele seja resolvido.
+                    Use <strong>Desativar</strong> no agendamento com erro, ou corrija e
+                    reenvie, para destravar os demais.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3" ref={scrollRef}>
               {schedules.filter((s: any) => {
                 if (hideDeactivated && s.status === 'deactivated') return false;
@@ -657,14 +746,15 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                 const isSent = s.status === 'sent'
                 const isDeactivated = s.status === 'deactivated'
                 const isError = s.status === 'error'
+                const isSkipped = s.status === 'skipped'
                 
                 return (
-                  <Card key={s.id} className={`border-l-4 ${isSent ? 'border-l-green-500 bg-muted/10' : isError ? 'border-l-red-500 bg-red-500/5' : isDeactivated ? 'border-l-muted bg-muted/5' : 'border-l-primary bg-card/40'} border-border/40 transition-all`}>
+                  <Card key={s.id} className={`border-l-4 ${isSent ? 'border-l-green-500 bg-muted/10' : isError ? 'border-l-red-500 bg-red-500/5' : isSkipped ? 'border-l-amber-500 bg-amber-500/5' : isDeactivated ? 'border-l-muted bg-muted/5' : 'border-l-primary bg-card/40'} border-border/40 transition-all`}>
                     <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                            {s.type}
+                            {({ text: 'texto', media: 'mídia', button: 'botões', poll: 'enquete', permission: 'permissão', profile: 'editar grupo' } as Record<string, string>)[s.type] || s.type}
                           </span>
                           <span className="text-sm text-muted-foreground">
                             {new Date(s.adjustedAt).toLocaleString()}
@@ -675,9 +765,40 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                           {s.type === 'media' && `[Mídia] ${content.caption || 'Sem legenda'}`}
                           {s.type === 'button' && `[Botões] ${content.title}`}
                           {s.type === 'poll' && `[Enquete] ${content.name}`}
+                          {s.type === 'permission' && 'Mudança de permissões'}
+                          {s.type === 'profile' && 'Edição do grupo'}
                         </p>
+
+                        {content.mentionAll && ['text', 'media', 'button', 'poll'].includes(s.type) && (
+                          <p className="text-xs text-primary mt-1 flex items-center gap-1">
+                            <Megaphone className="w-3 h-3" /> Marca todos os membros
+                          </p>
+                        )}
+
+                        {(s.type === 'permission' || s.type === 'profile') && (
+                          <ScheduleSummary
+                            type={s.type}
+                            content={content}
+                            appliedInfo={s.appliedInfo}
+                            status={s.status}
+                            estadoAtual={{
+                              name: initialGroup.name,
+                              topic: initialGroup.topic || '',
+                              isAnnounce: initialGroup.isAnnounce,
+                              isLocked: initialGroup.isLocked,
+                              isApprovalRequired: initialGroup.isApprovalRequired,
+                              adminOnlyAdd: initialGroup.adminOnlyAdd
+                            }}
+                          />
+                        )}
+
+                        {s.status === 'skipped' && s.skipReason && (
+                          <div className="mt-2 text-xs text-amber-500 bg-amber-500/10 p-2 rounded-md border border-amber-500/20 break-words">
+                            <span className="font-bold">Nada a fazer:</span> {s.skipReason}
+                          </div>
+                        )}
                         <p className="text-xs text-muted-foreground mt-1 uppercase font-semibold">
-                          Status: <span className={isSent ? 'text-green-500' : isError ? 'text-red-500' : isDeactivated ? 'text-muted-foreground' : 'text-primary'}>{s.status}</span>
+                          Status: <span className={isSent ? 'text-green-500' : isError ? 'text-red-500' : isSkipped ? 'text-amber-500' : isDeactivated ? 'text-muted-foreground' : 'text-primary'}>{s.status}</span>
                         </p>
                         {isError && s.errorMessage && (
                           <div className="mt-2 text-xs text-red-500 bg-red-500/10 p-2 rounded-md border border-red-500/20 max-w-full break-words">
@@ -722,29 +843,81 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
             </div>
           </TabsContent>
 
-          {/* Tab: Chat */}
-          <TabsContent value="messages" className="space-y-4 animate-in fade-in-50">
-            <Card className="border-border/40 bg-card/40 h-[60vh] flex flex-col">
+          {/* Tab: Permissões do grupo */}
+          <TabsContent value="permissions" className="space-y-4 animate-in fade-in-50">
+            <Card className="border-border/40 bg-card/40">
               <CardHeader className="border-b border-border/40 pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <MessageSquare className="w-5 h-5" /> Chat Ao Vivo
+                  <ShieldCheck className="w-5 h-5" /> Permissões do grupo
                 </CardTitle>
+                <CardDescription>
+                  Alterações são aplicadas direto no WhatsApp. Exige que a instância seja administradora do grupo.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
-                {messages.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-muted-foreground">
-                    Nenhuma mensagem recente.
-                  </div>
-                ) : (
-                  messages.map((m: any) => (
-                    <div key={m.id} className={`flex flex-col max-w-[80%] rounded-2xl p-3 ${m.fromMe ? 'bg-primary text-primary-foreground self-end ml-auto rounded-tr-sm' : 'bg-muted/50 text-foreground self-start mr-auto rounded-tl-sm'}`}>
-                      <div className={`text-xs font-semibold mb-1 ${m.fromMe ? 'text-primary-foreground/80' : 'text-primary'}`}>
-                        {m.participant || (m.fromMe ? 'Você' : 'Membro')} • {new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+              <CardContent className="pt-6 space-y-3">
+                {[
+                  {
+                    key: 'isAnnounce' as const,
+                    icon: <MessageSquare className="w-4 h-4" />,
+                    title: 'Somente administradores falam',
+                    on: 'Só admins podem enviar mensagens',
+                    off: 'Todos os membros podem enviar mensagens',
+                    actionOn: 'announcement',
+                    actionOff: 'not_announcement'
+                  },
+                  {
+                    key: 'isLocked' as const,
+                    icon: <Lock className="w-4 h-4" />,
+                    title: 'Somente administradores editam o grupo',
+                    on: 'Só admins mudam nome, foto e descrição',
+                    off: 'Todos podem mudar nome, foto e descrição',
+                    actionOn: 'locked',
+                    actionOff: 'unlocked'
+                  },
+                  {
+                    key: 'adminOnlyAdd' as const,
+                    icon: <UserPlus className="w-4 h-4" />,
+                    title: 'Somente administradores adicionam membros',
+                    on: 'Só admins adicionam participantes',
+                    off: 'Todos podem adicionar participantes',
+                    actionOn: 'admin_add',
+                    actionOff: 'all_member_add'
+                  },
+                  {
+                    key: 'isApprovalRequired' as const,
+                    icon: <Unlock className="w-4 h-4" />,
+                    title: 'Aprovar novos participantes',
+                    on: 'Entrada pelo link precisa de aprovação',
+                    off: 'Entrada pelo link é liberada',
+                    actionOn: 'approval_on',
+                    actionOff: 'approval_off'
+                  }
+                ].map(item => {
+                  const active = perms[item.key]
+                  const saving = savingPerm === item.key
+                  return (
+                    <div key={item.key} className="flex items-center justify-between gap-4 p-4 rounded-xl border border-border/50 bg-muted/20">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className={`mt-0.5 ${active ? 'text-primary' : 'text-muted-foreground'}`}>{item.icon}</div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium">{item.title}</p>
+                          <p className="text-xs text-muted-foreground">{active ? item.on : item.off}</p>
+                        </div>
                       </div>
-                      <p className="text-sm whitespace-pre-wrap">{m.content}</p>
+                      <Button
+                        variant={active ? 'default' : 'outline'}
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => applyPermission(item.key, active ? item.actionOff : item.actionOn)}
+                        className="flex-shrink-0 min-w-[104px]"
+                      >
+                        {saving
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : active ? 'Ativado' : 'Desativado'}
+                      </Button>
                     </div>
-                  ))
-                )}
+                  )
+                })}
               </CardContent>
             </Card>
           </TabsContent>
@@ -757,25 +930,155 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
           <DialogHeader>
             <DialogTitle>{editingId ? 'Editar Agendamento' : 'Novo Agendamento'}</DialogTitle>
             <DialogDescription>
-              Configure a mensagem e o horário de envio automático.
+              Escolha a ação, configure os campos e o horário de execução.{' '}
+              <Link href="/documentacao" target="_blank" className="underline hover:text-foreground">
+                Ver documentação do JSON
+              </Link>
             </DialogDescription>
           </DialogHeader>
           
           <form onSubmit={handleSaveSchedule} className="space-y-4 pt-4">
             <div className="space-y-2">
-              <Label>Tipo de Mensagem</Label>
+              <Label>Tipo de ação</Label>
               <Select value={newSchedule.type} onValueChange={v => setNewSchedule({...newSchedule, type: v})}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione o tipo..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="text">Texto Simples</SelectItem>
-                  <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, Doc)</SelectItem>
-                  <SelectItem value="button">Botões (Interativo)</SelectItem>
-                  <SelectItem value="poll">Enquete</SelectItem>
+                  <SelectItem value="text">Enviar texto</SelectItem>
+                  <SelectItem value="media">Enviar mídia (imagem, vídeo, áudio, doc)</SelectItem>
+                  <SelectItem value="button">Enviar botões (interativo)</SelectItem>
+                  <SelectItem value="poll">Enviar enquete</SelectItem>
+                  <SelectItem value="permission">Trocar permissão do grupo</SelectItem>
+                  <SelectItem value="profile">Editar grupo (nome, descrição, foto)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {newSchedule.type === 'permission' && (
+              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                <p className="text-xs text-muted-foreground">
+                  Escolha só as permissões que quer mudar. Na hora marcada o sistema
+                  confere como o grupo está: o que já estiver assim não é reaplicado.
+                </p>
+
+                {PERMISSION_GROUPS.map(par => (
+                  <div key={par.key} className="space-y-2">
+                    <Label className="text-sm">{par.label}</Label>
+                    <Select
+                      value={newSchedule.permissions[par.key] || 'nao_mexer'}
+                      onValueChange={v => {
+                        const copia = { ...newSchedule.permissions }
+                        if (v === 'nao_mexer') delete copia[par.key]
+                        else copia[par.key] = v
+                        setNewSchedule({ ...newSchedule, permissions: copia })
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="nao_mexer">Não mexer</SelectItem>
+                        {par.options.map(o => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+
+                {Object.keys(newSchedule.permissions).length === 0 && (
+                  <p className="text-xs text-amber-500">Escolha ao menos uma permissão.</p>
+                )}
+              </div>
+            )}
+
+            {newSchedule.type === 'profile' && (
+              <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
+                <p className="text-xs text-muted-foreground">
+                  Deixe em branco o que não quer mudar. Só os campos preenchidos
+                  são alterados no grupo.
+                </p>
+
+                <div className="space-y-2">
+                  <Label>Novo nome</Label>
+                  <Input
+                    maxLength={100}
+                    placeholder="Deixe vazio para não mudar"
+                    value={newSchedule.profileName}
+                    onChange={e => setNewSchedule({...newSchedule, profileName: e.target.value})}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Nova descrição</Label>
+                  <Textarea
+                    rows={3}
+                    placeholder="Deixe vazio para não mudar"
+                    value={newSchedule.profileDescription}
+                    onChange={e => setNewSchedule({...newSchedule, profileDescription: e.target.value})}
+                    className="resize-none"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Nova foto</Label>
+                  <Input
+                    placeholder="Cole uma URL, ou envie um arquivo abaixo"
+                    value={newSchedule.profilePicture}
+                    onChange={e => setNewSchedule({...newSchedule, profilePicture: e.target.value})}
+                  />
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      id="agenda-foto"
+                      className="hidden"
+                      onChange={async e => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        setIsUploading(true); setUploadError('')
+                        try {
+                          const form = new FormData()
+                          form.append('file', file)
+                          const res = await fetch('/api/upload', { method: 'POST', body: form })
+                          const data = await res.json()
+                          if (res.ok && data.filename) {
+                            setNewSchedule(prev => ({ ...prev, profilePicture: '/api/uploads/' + data.filename }))
+                          } else {
+                            setUploadError(data.error || 'Falha ao enviar a imagem.')
+                          }
+                        } catch (err) {
+                          setUploadError('Erro de conexão ao enviar a imagem.')
+                        } finally {
+                          setIsUploading(false)
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isUploading}
+                      onClick={() => document.getElementById('agenda-foto')?.click()}
+                    >
+                      {isUploading
+                        ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Enviando…</>
+                        : <><Upload className="w-4 h-4 mr-2" /> Enviar do computador</>}
+                    </Button>
+                    {newSchedule.profilePicture && (
+                      <img
+                        src={newSchedule.profilePicture}
+                        alt="Prévia"
+                        className="w-10 h-10 rounded-lg object-cover border border-border/50"
+                        onError={e => { e.currentTarget.style.display = 'none' }}
+                      />
+                    )}
+                  </div>
+                  {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
+                </div>
+              </div>
+            )}
 
             {newSchedule.type === 'text' && (
               <div className="space-y-2">
@@ -910,6 +1213,22 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
 
                 <div className="pt-2 space-y-3">
                   <Label className="font-semibold text-sm">Botões (Max 3)</Label>
+                  {erroBotoes && (
+                    <div className="text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>{erroBotoes}</span>
+                    </div>
+                  )}
+                  {!erroBotoes && usaReply && (
+                    <div className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>
+                        O WhatsApp está recusando botões de <strong>resposta rápida</strong> neste
+                        número — o envio falha com erro 405. Botões de <strong>link</strong>,{' '}
+                        <strong>copiar</strong> e <strong>ligar</strong> funcionam normalmente.
+                      </span>
+                    </div>
+                  )}
                   {newSchedule.buttonsList.map((btn: any, index: number) => (
                     <div key={index} className="p-3 border border-border/50 bg-background rounded-lg space-y-3 relative group">
                       <div className="flex justify-between items-center">
@@ -949,6 +1268,27 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                       {btn.type === 'url' && <Input required placeholder="https://..." value={btn.url||''} onChange={e => {
                         const list = [...newSchedule.buttonsList]; list[index] = {...btn, url: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
                       }} className="h-8" />}
+
+                      {btn.type === 'url' && (
+                        <label className="flex items-start gap-2 text-xs cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
+                            checked={Boolean(btn.track)}
+                            onChange={e => {
+                              const list = [...newSchedule.buttonsList];
+                              list[index] = { ...btn, track: e.target.checked };
+                              setNewSchedule({ ...newSchedule, buttonsList: list });
+                            }}
+                          />
+                          <span>
+                            Contar cliques
+                            <span className="block text-muted-foreground">
+                              O link vira um endereço curto que redireciona para o destino real.
+                            </span>
+                          </span>
+                        </label>
+                      )}
                       
                       {btn.type === 'call' && <Input required placeholder="+5511999999999" value={btn.phoneNumber||''} onChange={e => {
                         const list = [...newSchedule.buttonsList]; list[index] = {...btn, phoneNumber: e.target.value}; setNewSchedule({...newSchedule, buttonsList: list});
@@ -979,6 +1319,41 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                   <Input required placeholder="Manhã, Tarde, Noite" value={newSchedule.pollOptions} onChange={e => setNewSchedule({...newSchedule, pollOptions: e.target.value})} />
                 </div>
               </div>
+            )}
+
+            {['text', 'media'].includes(newSchedule.type) && (
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-border/50 bg-muted/10 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
+                  checked={newSchedule.trackLinks}
+                  onChange={e => setNewSchedule({ ...newSchedule, trackLinks: e.target.checked })}
+                />
+                <span className="text-sm">
+                  Contar cliques nos links
+                  <span className="block text-xs text-muted-foreground">
+                    Cada link do texto vira um endereço curto que redireciona para o destino
+                    real e registra o clique.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {['text', 'media', 'button', 'poll'].includes(newSchedule.type) && (
+              <label className="flex items-start gap-3 p-3 rounded-lg border border-border/50 bg-muted/10 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
+                  checked={newSchedule.mentionAll}
+                  onChange={e => setNewSchedule({ ...newSchedule, mentionAll: e.target.checked })}
+                />
+                <span className="text-sm">
+                  Marcar todos os membros
+                  <span className="block text-xs text-muted-foreground">
+                    Notifica todo mundo sem escrever @ de ninguém — a menção fica invisível na mensagem.
+                  </span>
+                </span>
+              </label>
             )}
 
             <div className="space-y-2 pt-2 border-t border-border/50 flex flex-col">
@@ -1061,7 +1436,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
 
             <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
               <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
-              <Button type="submit" className="w-full sm:w-auto">Salvar Agendamento</Button>
+              <Button type="submit" className="w-full sm:w-auto" disabled={Boolean(erroBotoes)}>Salvar Agendamento</Button>
             </DialogFooter>
           </form>
         </DialogContent>

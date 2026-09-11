@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import BulkEditModal from './BulkEditModal'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
@@ -123,6 +124,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false)
+  // Selecao para edicao em massa
+  const [modoSelecao, setModoSelecao] = useState(false)
+  const [selecionados, setSelecionados] = useState<string[]>([])
+  const [bulkAberto, setBulkAberto] = useState(false)
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [qrCodeBase64, setQrCodeBase64] = useState<string>('')
   
@@ -662,13 +667,88 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               <Plus className="w-4 h-4 mr-2" />
               Adicionar
             </Button>
+            <Button
+              variant={modoSelecao ? 'default' : 'outline'}
+              onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]) }}
+              className="flex-none"
+              title="Selecionar grupos para editar em massa"
+            >
+              <PencilRuler className="w-4 h-4 mr-2" />
+              {modoSelecao ? 'Cancelar seleção' : 'Editar em massa'}
+            </Button>
+            <Link href="/links" className="flex-none">
+              <Button variant="ghost" className="w-full" title="Cliques nos links">
+                <MousePointerClick className="w-4 h-4 mr-2" />
+                Cliques
+              </Button>
+            </Link>
+            <Link href="/chaves" className="flex-none">
+              <Button variant="ghost" className="w-full" title="Chaves de API e MCP">
+                <KeyRound className="w-4 h-4 mr-2" />
+                Chaves
+              </Button>
+            </Link>
+            <Link href="/documentacao" className="flex-none">
+              <Button variant="ghost" className="w-full" title="Documentação do JSON, API e MCP">
+                <BookOpen className="w-4 h-4 mr-2" />
+                Docs
+              </Button>
+            </Link>
           </div>
         </div>
 
+        <BulkEditModal
+          open={bulkAberto}
+          onOpenChange={setBulkAberto}
+          groupIds={selecionados}
+          onDone={() => { setModoSelecao(false); setSelecionados([]) }}
+        />
+
+        {modoSelecao && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelecionados(
+                  selecionados.length === filteredGroups.length
+                    ? []
+                    : filteredGroups.map((g: any) => g.id)
+                )}
+              >
+                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
+                  ? <CheckSquare className="w-4 h-4 mr-2" />
+                  : <Square className="w-4 h-4 mr-2" />}
+                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
+                  ? 'Desmarcar todos'
+                  : 'Marcar todos'}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {selecionados.length} grupo(s) selecionado(s)
+              </span>
+            </div>
+            <Button disabled={selecionados.length === 0} onClick={() => setBulkAberto(true)}>
+              <PencilRuler className="w-4 h-4 mr-2" />
+              Editar selecionados
+            </Button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredGroups.map(g => (
-            <Link href={`/${g.slug}`} key={g.id}>
-              <Card className="group h-full border-border/40 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:-translate-y-1 bg-card/40 cursor-pointer">
+            <div
+              key={g.id}
+              onClick={modoSelecao ? () => setSelecionados(prev =>
+                prev.includes(g.id) ? prev.filter(i => i !== g.id) : [...prev, g.id]
+              ) : undefined}
+              className={modoSelecao ? 'cursor-pointer' : ''}
+            >
+            <ConditionalLink href={`/${g.slug}`} desativado={modoSelecao}>
+              <Card className={`group h-full border-border/40 transition-all duration-300 bg-card/40 cursor-pointer ${
+                modoSelecao && selecionados.includes(g.id)
+                  ? 'border-primary ring-2 ring-primary/40'
+                  : 'hover:border-primary/50 hover:shadow-lg hover:-translate-y-1'
+              }`}>
                 <CardHeader className="flex flex-row items-center gap-4 pb-2">
                   {g.picture ? (
                     <img src={g.picture} alt={g.name} className="w-12 h-12 rounded-lg object-cover ring-1 ring-border" />
@@ -722,7 +802,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   </div>
                 </CardContent>
               </Card>
-            </Link>
+            </ConditionalLink>
+            </div>
           ))}
           {filteredGroups.length === 0 && (
             <div className="col-span-full py-12 text-center text-muted-foreground bg-muted/10 rounded-lg border border-dashed border-border/50">
@@ -1330,4 +1411,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       </Dialog>
     </div>
   )
+}
+
+/** No modo de seleção o card não navega — só marca e desmarca. */
+function ConditionalLink({ href, desativado, children }: { href: string; desativado: boolean; children: React.ReactNode }) {
+  if (desativado) return <>{children}</>
+  return <Link href={href}>{children}</Link>
 }

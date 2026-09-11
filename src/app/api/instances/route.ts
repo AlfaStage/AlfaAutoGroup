@@ -20,7 +20,7 @@ import { isAuthenticated } from '@/lib/auth'
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Não autorizado', debug: process.env.AI_API_KEY }, { status: 401 })
+  if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
 
   try { const apiUrl = process.env.EVOLUTION_API_URL
     const apiKey = process.env.EVOLUTION_API_KEY

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isAuthenticated } from '@/lib/auth'
+import { getInstanceToken, evolutionCall } from '@/lib/evolution'
 
 /**
  * @swagger
@@ -91,34 +92,43 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Evolution API credentials missing' }, { status: 500 })
     }
 
-    // 1. Chamar a Evolution API para criar o grupo real
-    const evoPayload = {
-      subject: name,
-      description: description || '',
-      participants: participants ? participants.split(',').map((p: string) => p.trim()) : []
+    // 1. Criar o grupo real na Evolution GO.
+    // A rota e /group/create (nao /group/createGroup), o campo e groupName
+    // (nao subject) e a chamada exige o token da instancia, nao a chave global.
+    const token = await getInstanceToken(instanceName)
+    if (!token) {
+      return NextResponse.json(
+        { error: `Instancia "${instanceName}" nao encontrada na Evolution API` },
+        { status: 404 }
+      )
     }
 
-    console.log("Criando grupo na Evolution API:", evoPayload);
-    const res = await fetch(`${apiUrl}/group/createGroup?instanceName=${instanceName}`, {
+    const evoPayload = {
+      groupName: name,
+      participants: participants
+        ? participants.split(',').map((p: string) => p.trim()).filter(Boolean)
+        : []
+    }
+
+    const created = await evolutionCall('/group/create', {
       method: 'POST',
-      headers: {
-        'apikey': apiKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(evoPayload)
+      token,
+      body: evoPayload
     })
 
-    if (!res.ok) {
-      const errText = await res.text()
-      console.error("Evolution API erro ao criar grupo:", errText)
-      return NextResponse.json({ error: 'Failed to create group in WhatsApp', details: errText }, { status: res.status })
+    if (!created.ok) {
+      console.error("Evolution API erro ao criar grupo:", created.text)
+      return NextResponse.json(
+        { error: 'Failed to create group in WhatsApp', details: created.text },
+        { status: created.status }
+      )
     }
 
-    const evoData = await res.json()
-    console.log("Resposta Evolution API (Group):", evoData)
-    
-    // O ID do grupo geralmente vem no campo 'id', 'groupId' ou dentro de 'data'
-    const evolutionGroupId = evoData.id || evoData.groupId || evoData.data?.id || evoData.data?.groupId || '';
+    const evoData: any = created.data || {}
+    const evolutionGroupId =
+      evoData.JID || evoData.jid || evoData.id || evoData.groupId
+      || evoData.data?.JID || evoData.data?.jid || evoData.data?.id || evoData.data?.groupId
+      || '';
 
     // 2. Salvar no banco de dados local com o ID gerado
     const group = await prisma.group.create({
