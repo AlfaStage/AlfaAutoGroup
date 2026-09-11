@@ -6,12 +6,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { detectarPadrao } from '@/lib/name-pattern'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle
 } from '@/components/ui/dialog'
 import {
   Tag as TagIcon, Plus, Users, Link2, Copy, Check, Loader2, Trash2, Settings2,
-  ArrowUp, ArrowDown, AlertCircle, Sparkles
+  ArrowUp, ArrowDown, AlertCircle, Sparkles, Search, Wand2
 } from 'lucide-react'
 
 type Grupo = {
@@ -36,6 +38,7 @@ type Tag = {
   capacity: number
   namePattern: string | null
   cloneSchedules: boolean
+  copyAdmins: boolean
   instanceName: string | null
   inviteCode: string | null
   grupos: Grupo[]
@@ -57,20 +60,41 @@ export default function TagsClient() {
   const [novaAberta, setNovaAberta] = useState(false)
   const [editando, setEditando] = useState<Tag | null>(null)
   const [gerenciandoGrupos, setGerenciandoGrupos] = useState<Tag | null>(null)
+  // Quando a tag acabou de ser criada, o passo 2 abre sozinho.
+  const [recemCriada, setRecemCriada] = useState(false)
+  const [instancias, setInstancias] = useState<string[]>([])
 
-  const carregar = useCallback(async () => {
+  /** Recarrega tudo e devolve as tags, para o fluxo de dois passos usar. */
+  const carregar = useCallback(async (): Promise<Tag[]> => {
+    let listaTags: Tag[] = []
     try {
-      const [rt, rg] = await Promise.all([fetch('/api/tags'), fetch('/api/groups')])
-      if (rt.ok) setTags(await rt.json())
+      const [rt, rg, ri] = await Promise.all([
+        fetch('/api/tags'),
+        fetch('/api/groups'),
+        fetch('/api/instances')
+      ])
+
+      if (rt.ok) {
+        listaTags = await rt.json()
+        setTags(listaTags)
+      }
       if (rg.ok) {
         const d = await rg.json()
         setGrupos(Array.isArray(d) ? d : (d.data || []))
+      }
+      if (ri.ok) {
+        const d = await ri.json()
+        const lista = Array.isArray(d) ? d : (d.data || [])
+        setInstancias(
+          lista.map((i: any) => i.name || i.instance?.instanceName).filter(Boolean)
+        )
       }
     } catch {
       setErro('Falha ao carregar.')
     } finally {
       setCarregando(false)
     }
+    return listaTags
   }, [])
 
   useEffect(() => { carregar() }, [carregar])
@@ -284,15 +308,26 @@ export default function TagsClient() {
       <TagFormModal
         open={novaAberta || Boolean(editando)}
         tag={editando}
+        instancias={instancias}
         onOpenChange={(v) => { if (!v) { setNovaAberta(false); setEditando(null) } }}
-        onSaved={() => { setNovaAberta(false); setEditando(null); carregar() }}
+        onSaved={async (tagId, criada) => {
+          setNovaAberta(false)
+          setEditando(null)
+          const lista = await carregar()
+          // Tag nova leva direto para a escolha dos grupos.
+          if (criada && tagId) {
+            const nova = lista.find((t: Tag) => t.id === tagId)
+            if (nova) { setRecemCriada(true); setGerenciandoGrupos(nova) }
+          }
+        }}
       />
 
       <GruposDaTagModal
         tag={gerenciandoGrupos}
         todosGrupos={grupos}
-        onOpenChange={(v) => { if (!v) setGerenciandoGrupos(null) }}
-        onSaved={() => { setGerenciandoGrupos(null); carregar() }}
+        recemCriada={recemCriada}
+        onOpenChange={(v) => { if (!v) { setGerenciandoGrupos(null); setRecemCriada(false) } }}
+        onSaved={() => { setGerenciandoGrupos(null); setRecemCriada(false); carregar() }}
       />
     </div>
   )
@@ -301,12 +336,14 @@ export default function TagsClient() {
 // ------------------------------------------------------------ formulário
 
 function TagFormModal({
-  open, tag, onOpenChange, onSaved
+  open, tag, instancias, onOpenChange, onSaved
 }: {
   open: boolean
   tag: Tag | null
+  instancias: string[]
   onOpenChange: (v: boolean) => void
-  onSaved: () => void
+  /** `criada` diz se é uma tag nova, para o fluxo seguir ao passo 2. */
+  onSaved: (tagId: string, criada: boolean) => void
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -315,6 +352,7 @@ function TagFormModal({
   const [capacity, setCapacity] = useState('950')
   const [namePattern, setNamePattern] = useState('')
   const [cloneSchedules, setCloneSchedules] = useState(true)
+  const [copyAdmins, setCopyAdmins] = useState(true)
   const [instanceName, setInstanceName] = useState('')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
@@ -329,8 +367,15 @@ function TagFormModal({
     setCapacity(String(tag?.capacity ?? 950))
     setNamePattern(tag?.namePattern || '')
     setCloneSchedules(tag?.cloneSchedules !== false)
-    setInstanceName(tag?.instanceName || '')
-  }, [open, tag])
+    setCopyAdmins(tag?.copyAdmins !== false)
+
+    // Tag nova já vem com a instância que você está usando no painel.
+    let inicial = tag?.instanceName || ''
+    if (!inicial && !tag) {
+      try { inicial = localStorage.getItem('selectedInstance') || '' } catch { /* sem storage */ }
+    }
+    setInstanceName(inicial && instancias.includes(inicial) ? inicial : (inicial || ''))
+  }, [open, tag, instancias])
 
   const salvar = async () => {
     setSalvando(true)
@@ -341,6 +386,7 @@ function TagFormModal({
         capacity: Number(capacity) || 950,
         namePattern: namePattern || undefined,
         cloneSchedules,
+        copyAdmins,
         instanceName: instanceName || undefined
       }
       const res = await fetch(tag ? `/api/tags/${tag.id}` : '/api/tags', {
@@ -350,7 +396,7 @@ function TagFormModal({
       })
       const d = await res.json()
       if (!res.ok) { setErro(d.error || 'Falha ao salvar.'); return }
-      onSaved()
+      onSaved(d.id || tag?.id || '', !tag)
     } catch {
       setErro('Erro de conexão.')
     } finally {
@@ -362,9 +408,11 @@ function TagFormModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{tag ? `Configurar "${tag.name}"` : 'Nova tag'}</DialogTitle>
+          <DialogTitle>{tag ? `Configurar "${tag.name}"` : 'Nova tag — passo 1 de 2'}</DialogTitle>
           <DialogDescription>
-            Tags agrupam grupos parecidos e controlam a fila de entrada de pessoas novas.
+            {tag
+              ? 'Tags agrupam grupos parecidos e controlam a fila de entrada de pessoas novas.'
+              : 'Primeiro os dados da tag. Em seguida você escolhe os grupos.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -409,6 +457,24 @@ function TagFormModal({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="tag-inst">Instância</Label>
+            <Select value={instanceName || 'auto'} onValueChange={v => setInstanceName(v === 'auto' ? '' : v)}>
+              <SelectTrigger id="tag-inst">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Usar a do último grupo da tag</SelectItem>
+                {instancias.map(i => (
+                  <SelectItem key={i} value={i}>{i}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              É a instância que vai criar os grupos novos desta tag.
+            </p>
+          </div>
+
           <div className="rounded-xl border border-border/50 bg-muted/10 p-4 space-y-4">
             <label className="flex items-start gap-3 cursor-pointer">
               <input
@@ -426,45 +492,32 @@ function TagFormModal({
               </span>
             </label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tag-cap">Capacidade por grupo</Label>
-                <Input
-                  id="tag-cap"
-                  type="number"
-                  min={2}
-                  value={capacity}
-                  onChange={e => setCapacity(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  O WhatsApp permite até 1024. Deixe uma folga.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tag-inst">Instância</Label>
-                <Input
-                  id="tag-inst"
-                  placeholder="Ex.: IceLaser-0800"
-                  value={instanceName}
-                  onChange={e => setInstanceName(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Vazio = usa a do último grupo da tag.
-                </p>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="tag-cap">Capacidade por grupo</Label>
+              <Input
+                id="tag-cap"
+                type="number"
+                min={2}
+                value={capacity}
+                onChange={e => setCapacity(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                O WhatsApp permite até 1024. Deixe uma folga.
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="tag-padrao">Padrão do nome dos grupos novos</Label>
               <Input
                 id="tag-padrao"
-                placeholder="Ex.: Salvador {n}"
+                placeholder={`Ex.: ${name || 'Salvador'} {n}`}
                 value={namePattern}
                 onChange={e => setNamePattern(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
                 <code className="bg-muted/50 px-1 rounded">{'{n}'}</code> vira a posição do
-                grupo na tag. Vazio = &quot;{name || 'Nome da tag'} {'{n}'}&quot;.
+                grupo. No próximo passo o sistema sugere um padrão a partir dos nomes
+                que você escolher.
               </p>
             </div>
 
@@ -482,6 +535,22 @@ function TagFormModal({
                 </span>
               </span>
             </label>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
+                checked={copyAdmins}
+                onChange={e => setCopyAdmins(e.target.checked)}
+              />
+              <span className="text-sm">
+                Copiar os administradores em comum
+                <span className="block text-xs text-muted-foreground">
+                  Quem é admin em todos os grupos da tag entra no grupo novo e já é
+                  promovido a administrador.
+                </span>
+              </span>
+            </label>
           </div>
 
           {erro && (
@@ -494,7 +563,7 @@ function TagFormModal({
           <Button onClick={salvar} disabled={salvando || !name.trim()}>
             {salvando
               ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando…</>
-              : tag ? 'Salvar' : 'Criar tag'}
+              : tag ? 'Salvar' : 'Continuar para os grupos'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -505,25 +574,44 @@ function TagFormModal({
 // -------------------------------------------------- grupos vinculados
 
 function GruposDaTagModal({
-  tag, todosGrupos, onOpenChange, onSaved
+  tag, todosGrupos, recemCriada, onOpenChange, onSaved
 }: {
   tag: Tag | null
   todosGrupos: any[]
+  recemCriada: boolean
   onOpenChange: (v: boolean) => void
   onSaved: () => void
 }) {
   const [ordem, setOrdem] = useState<string[]>([])
+  const [busca, setBusca] = useState('')
+  const [soDaInstancia, setSoDaInstancia] = useState(true)
   const [salvando, setSalvando] = useState(false)
+  const [padraoSalvo, setPadraoSalvo] = useState(false)
 
   useEffect(() => {
     if (!tag) return
     setOrdem(tag.grupos.map(g => g.id))
+    setBusca('')
+    setPadraoSalvo(false)
+    setSoDaInstancia(Boolean(tag.instanceName))
   }, [tag])
 
   if (!tag) return null
 
   const porId = new Map(todosGrupos.map((g: any) => [g.id, g]))
-  const disponiveis = todosGrupos.filter((g: any) => !ordem.includes(g.id))
+  const termo = busca.trim().toLowerCase()
+
+  const disponiveis = todosGrupos
+    .filter((g: any) => !ordem.includes(g.id))
+    .filter((g: any) => !soDaInstancia || !tag.instanceName || g.instanceName === tag.instanceName)
+    .filter((g: any) => !termo || String(g.name || '').toLowerCase().includes(termo))
+
+  // Padrão sugerido a partir dos nomes que já estão na tag
+  const nomesNaTag = ordem
+    .map(id => porId.get(id)?.name || tag.grupos.find(x => x.id === id)?.name)
+    .filter(Boolean) as string[]
+  const sugestao = detectarPadrao(nomesNaTag)
+  const padraoJaIgual = sugestao && sugestao.padrao === tag.namePattern
 
   const mover = (i: number, delta: number) => {
     const j = i + delta
@@ -532,6 +620,16 @@ function GruposDaTagModal({
     const [item] = copia.splice(i, 1)
     copia.splice(j, 0, item)
     setOrdem(copia)
+  }
+
+  const usarPadrao = async () => {
+    if (!sugestao) return
+    await fetch(`/api/tags/${tag.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ namePattern: sugestao.padrao })
+    })
+    setPadraoSalvo(true)
   }
 
   const salvar = async () => {
@@ -552,7 +650,9 @@ function GruposDaTagModal({
     <Dialog open={Boolean(tag)} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Grupos de &quot;{tag.name}&quot;</DialogTitle>
+          <DialogTitle>
+            {recemCriada ? 'Nova tag — passo 2 de 2' : `Grupos de "${tag.name}"`}
+          </DialogTitle>
           <DialogDescription>
             A ordem define a fila: quem entra pelo link vai para o primeiro grupo
             com vaga.
@@ -560,10 +660,44 @@ function GruposDaTagModal({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
+          {/* ------------------------------------------ padrão detectado */}
+          {sugestao && (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Wand2 className="w-4 h-4 text-primary" />
+                Padrão detectado nos nomes
+              </div>
+              <code className="block text-sm bg-background/60 border border-border/50 rounded px-2 py-1.5">
+                {sugestao.padrao}
+              </code>
+              <p className="text-xs text-muted-foreground">
+                {sugestao.confianca === 'alta'
+                  ? `Todos os ${sugestao.total} grupos seguem este padrão.`
+                  : sugestao.confianca === 'media'
+                    ? `${sugestao.encaixam} de ${sugestao.total} grupos seguem este padrão.`
+                    : 'Sugestão a partir do que os nomes têm em comum — confira antes de usar.'}
+                {' '}O próximo grupo se chamaria <strong>{sugestao.exemploProximo}</strong>.
+              </p>
+              {padraoJaIgual || padraoSalvo ? (
+                <p className="text-xs text-green-500 flex items-center gap-1">
+                  <Check className="w-3 h-3" /> Em uso nesta tag.
+                </p>
+              ) : (
+                <Button variant="outline" size="sm" onClick={usarPadrao}>
+                  Usar este padrão
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* ------------------------------------------------ na tag */}
           <div className="space-y-2">
             <Label>Na tag ({ordem.length})</Label>
             {ordem.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhum grupo ainda.</p>
+              <p className="text-sm text-muted-foreground">
+                Nenhum grupo ainda. Escolha abaixo — o primeiro da lista recebe
+                as pessoas novas.
+              </p>
             )}
             <div className="space-y-2">
               {ordem.map((id, i) => {
@@ -589,8 +723,33 @@ function GruposDaTagModal({
             </div>
           </div>
 
+          {/* --------------------------------------------- adicionar */}
           <div className="space-y-2">
-            <Label>Adicionar ({disponiveis.length} disponíveis)</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Adicionar</Label>
+              {tag.instanceName && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                    checked={soDaInstancia}
+                    onChange={e => setSoDaInstancia(e.target.checked)}
+                  />
+                  Só de {tag.instanceName}
+                </label>
+              )}
+            </div>
+
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar grupo pelo nome…"
+                value={busca}
+                onChange={e => setBusca(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
             <div className="max-h-[220px] overflow-y-auto space-y-1 rounded-lg border border-border/50 p-2">
               {disponiveis.map((g: any) => (
                 <button
@@ -606,18 +765,24 @@ function GruposDaTagModal({
                 </button>
               ))}
               {disponiveis.length === 0 && (
-                <p className="text-xs text-muted-foreground p-2">Todos os grupos já estão nesta tag.</p>
+                <p className="text-xs text-muted-foreground p-2">
+                  {termo
+                    ? `Nenhum grupo com "${busca}".`
+                    : 'Todos os grupos disponíveis já estão nesta tag.'}
+                </p>
               )}
             </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={salvando}>Fechar</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={salvando}>
+            {recemCriada ? 'Deixar para depois' : 'Fechar'}
+          </Button>
           <Button onClick={salvar} disabled={salvando}>
             {salvando
               ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Salvando…</>
-              : 'Salvar ordem'}
+              : recemCriada ? 'Concluir' : 'Salvar ordem'}
           </Button>
         </DialogFooter>
       </DialogContent>

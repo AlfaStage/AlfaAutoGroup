@@ -89,6 +89,52 @@ function proximoNome(tag, grupos) {
  *
  * O numero da propria instancia fica de fora — ele ja entra como criador.
  */
+/**
+ * Administradores que aparecem em TODOS os grupos da tag que ja foram
+ * sincronizados. Sao os numeros da operacao — quem precisa administrar o
+ * grupo novo tambem.
+ *
+ * Se a intersecao vier vazia (grupos com equipes diferentes), cai para quem
+ * e admin na maioria deles, para nao deixar o grupo novo sem ninguem.
+ */
+async function administradoresEmComum(prisma, grupos, numeroDaInstancia) {
+  const conjuntos = [];
+
+  for (const g of grupos) {
+    const admins = await prisma.groupMember.findMany({
+      where: { groupId: g.id, isAdmin: true },
+      select: { phone: true }
+    });
+
+    const numeros = admins
+      .map((a) => String(a.phone || '').replace(/\D/g, ''))
+      .filter((n) => n.length >= 10 && n !== numeroDaInstancia);
+
+    // Grupo sem membros sincronizados nao entra na conta: ele zeraria a
+    // intersecao sem querer dizer nada.
+    if (numeros.length) conjuntos.push(new Set(numeros));
+  }
+
+  if (conjuntos.length === 0) return [];
+
+  const intersecao = [...conjuntos[0]].filter((n) =>
+    conjuntos.every((c) => c.has(n))
+  );
+  if (intersecao.length) return intersecao;
+
+  // Sem intersecao: quem aparece na maioria
+  const contagem = new Map();
+  for (const c of conjuntos) {
+    for (const n of c) contagem.set(n, (contagem.get(n) || 0) + 1);
+  }
+  const minimo = Math.ceil(conjuntos.length / 2);
+  return [...contagem.entries()]
+    .filter(([, vezes]) => vezes >= minimo)
+    .sort((a, b) => b[1] - a[1])
+    .map(([n]) => n)
+    .slice(0, 5);
+}
+
 async function numerosSemente(prisma, grupos, instanceName) {
   const numeroDaInstancia = await numeroDaInstanciaDe(prisma, grupos);
 
@@ -135,7 +181,19 @@ async function criarProximoGrupo(prisma, tag, grupos) {
 
   // A Evolution nao cria grupo vazio. O grupo novo nasce com os mesmos
   // administradores do anterior, que sao os numeros da propria operacao.
-  const participantes = await numerosSemente(prisma, grupos, instanceName);
+  const numeroDaInstancia = await numeroDaInstanciaDe(prisma, grupos);
+
+  // Admins em comum entram primeiro: alem de servirem de semente, eles serao
+  // promovidos logo apos a criacao.
+  const adminsComuns = tag.copyAdmins
+    ? await administradoresEmComum(prisma, grupos, numeroDaInstancia)
+    : [];
+
+  const semente = await numerosSemente(prisma, grupos, instanceName);
+  const participantes = Array.from(new Set([
+    ...adminsComuns.map((n) => n + '@s.whatsapp.net'),
+    ...semente
+  ]));
   if (participantes.length === 0) {
     return {
       ok: false,
@@ -179,6 +237,24 @@ async function criarProximoGrupo(prisma, tag, grupos) {
     data: { groupId: novo.id, tagId: tag.id, position: grupos.length }
   });
 
+  // Promove os admins em comum, para o grupo novo nascer com a mesma equipe.
+  let promovidos = [];
+  if (adminsComuns.length) {
+    const r = await evo('/group/participant', {
+      token,
+      body: {
+        groupJid: jid,
+        participants: adminsComuns.map((n) => n + '@s.whatsapp.net'),
+        action: 'promote'
+      }
+    });
+    if (r.ok) {
+      promovidos = adminsComuns;
+    } else {
+      console.warn(`[capacidade] grupo ${nome}: nao consegui promover os admins (${r.texto})`);
+    }
+  }
+
   // Registra quem entrou. Sem isso o grupo novo nasceria sem membros
   // conhecidos e nao serviria de semente para o proximo da fila.
   const entraram = (d.data && d.data.added) || d.added || [];
@@ -191,7 +267,8 @@ async function criarProximoGrupo(prisma, tag, grupos) {
       data: numerosQueEntraram.map((phone) => ({
         groupId: novo.id,
         phone,
-        role: 'participant'
+        isAdmin: promovidos.includes(phone),
+        role: promovidos.includes(phone) ? 'admin' : 'participant'
       }))
     }).catch(() => { /* sincronizacao seguinte corrige */ });
   }
@@ -228,7 +305,7 @@ async function criarProximoGrupo(prisma, tag, grupos) {
   // Aplica nome/descricao herdados e busca o link de convite.
   const link = await garantirLinkDeConvite(prisma, novo, true);
 
-  return { ok: true, grupo: novo, nome, copiados, link };
+  return { ok: true, grupo: novo, nome, copiados, link, promovidos: promovidos.length };
 }
 
 /**
@@ -329,6 +406,8 @@ async function destinoDoConvite(prisma, codigo) {
 }
 
 module.exports = {
+  administradoresEmComum,
+  numerosSemente,
   garantirLinkDeConvite,
   grupasDaTag,
   primeiroComVaga,

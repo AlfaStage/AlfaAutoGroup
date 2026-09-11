@@ -646,6 +646,19 @@ export default function DocsContent() {
             vaga</strong>. A ordem dos grupos você define arrastando na tela da tag.
           </p>
 
+          <p className="font-medium pt-1">Montando a tag</p>
+          <p>
+            Ao criar, o painel pede os dados da tag e em seguida abre a escolha dos
+            grupos — dois passos. A instância já vem preenchida com a que você está
+            usando, e a lista de grupos tem busca por nome e filtro por instância.
+          </p>
+          <p className="text-muted-foreground">
+            Depois de escolher os grupos, o sistema <strong>detecta o padrão dos
+            nomes</strong> e sugere o template. Por exemplo, com &quot;Feira de Santana #1&quot;
+            e &quot;#2&quot; ele propõe <code className="text-xs">Feira de Santana #{'{n}'}</code> e
+            mostra como o próximo grupo se chamaria. Um clique adota a sugestão.
+          </p>
+
           <p className="font-medium pt-1">Criação automática</p>
           <p>
             Com <strong>criar o próximo grupo automaticamente</strong> ligado, quando
@@ -656,6 +669,7 @@ export default function DocsContent() {
             linhas={[
               ['Nome', 'Segue o padrão da tag — {n} vira a posição, ex.: "Salvador 4"'],
               ['Participantes', 'Os números já conhecidos dos grupos da tag entram no grupo novo'],
+              ['Administradores', 'Quem é admin em todos os grupos da tag entra e já é promovido (opcional)'],
               ['Agendamentos', 'Os pendentes do grupo anterior são copiados, se você deixar marcado'],
               ['Link de entrada', 'Passa a apontar para o grupo novo na mesma hora'],
               ['Aviso', 'Uma mensagem é enviada no grupo de gestão contando o que foi criado']

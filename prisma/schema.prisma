@@ -151,6 +151,7 @@ model Tag {
   capacity       Int      @default(950)
   namePattern    String? // ex.: "Salvador {n}" — {n} vira a posicao do grupo
   cloneSchedules Boolean  @default(true)
+  copyAdmins     Boolean  @default(true) // admins comuns da tag entram e viram admin no grupo novo
   instanceName   String? // instancia usada para criar os grupos novos
   inviteCode     String?  @unique // codigo do link publico /g/{codigo}
   createdAt      DateTime @default(now())

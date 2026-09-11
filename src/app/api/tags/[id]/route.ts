@@ -37,6 +37,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if ('capacity' in body) dados.capacity = Math.max(2, Number(body.capacity) || tag.capacity)
   if ('namePattern' in body) dados.namePattern = body.namePattern || null
   if ('cloneSchedules' in body) dados.cloneSchedules = Boolean(body.cloneSchedules)
+  if ('copyAdmins' in body) dados.copyAdmins = Boolean(body.copyAdmins)
   if ('instanceName' in body) dados.instanceName = body.instanceName || null
 
   const atualizada = await prisma.tag.update({ where: { id }, data: dados })

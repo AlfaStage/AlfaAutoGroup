@@ -61,6 +61,7 @@ export async function GET(request: Request) {
       capacity: t.capacity,
       namePattern: t.namePattern,
       cloneSchedules: t.cloneSchedules,
+      copyAdmins: t.copyAdmins,
       instanceName: t.instanceName,
       inviteCode: t.inviteCode,
       grupos,
@@ -117,6 +118,7 @@ export async function POST(request: Request) {
         capacity: Math.max(2, Number(body.capacity) || 950),
         namePattern: body.namePattern ? String(body.namePattern) : `${name} {n}`,
         cloneSchedules: body.cloneSchedules !== false,
+        copyAdmins: body.copyAdmins !== false,
         instanceName: body.instanceName ? String(body.instanceName) : null,
         // Código do link público. Só é gerado quando a tag vai receber gente.
         inviteCode: randomBytes(5).toString('hex')
