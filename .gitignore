@@ -49,3 +49,6 @@ next-env.d.ts
 
 # Cache de fotos e arquivos enviados (dados, nao codigo)
 uploads/
+
+# Config local do editor
+.claude/
