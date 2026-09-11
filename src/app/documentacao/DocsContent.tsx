@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Copy, Check, Clock, MessageSquare, ShieldCheck, Image as ImageIcon, Plug, Bot, Megaphone, MousePointerClick, PencilRuler } from 'lucide-react'
+import { Copy, Check, Clock, MessageSquare, ShieldCheck, Image as ImageIcon, Plug, Bot, Megaphone, MousePointerClick, PencilRuler, Tag as TagIcon, Bell } from 'lucide-react'
 
 function Bloco({ codigo }: { codigo: string }) {
   const [copiado, setCopiado] = useState(false)
@@ -100,6 +100,8 @@ const INDICE = [
   { id: 'mencao', texto: 'Marcar todos' },
   { id: 'cliques', texto: 'Cliques em links' },
   { id: 'massa', texto: 'Edição em massa' },
+  { id: 'tags', texto: 'Tags e lotação' },
+  { id: 'alertas', texto: 'Alertas e relatório' },
   { id: 'api', texto: 'API' },
   { id: 'mcp', texto: 'MCP' }
 ]
@@ -626,6 +628,106 @@ export default function DocsContent() {
         </Secao>
 
         <Secao
+          id="tags"
+          icone={<TagIcon className="w-5 h-5" />}
+          titulo="Tags e lotação"
+          descricao="Agrupe grupos parecidos e nunca fique sem grupo com vaga."
+        >
+          <p>
+            Uma tag junta grupos com a mesma característica — cidade, unidade,
+            serviço, o critério é seu. Além de organizar, ela controla a fila de
+            entrada de gente nova.
+          </p>
+
+          <p className="font-medium pt-1">Link único de entrada</p>
+          <p>
+            Cada tag ganha um endereço <code className="text-xs">/g/&lt;código&gt;</code>.
+            Quem clica é mandado para o <strong>primeiro grupo da fila que ainda tem
+            vaga</strong>. A ordem dos grupos você define arrastando na tela da tag.
+          </p>
+
+          <p className="font-medium pt-1">Criação automática</p>
+          <p>
+            Com <strong>criar o próximo grupo automaticamente</strong> ligado, quando
+            todos os grupos da tag atingem a capacidade o sistema cria mais um:
+          </p>
+          <Tabela
+            cabecalho={['O que acontece', 'Detalhe']}
+            linhas={[
+              ['Nome', 'Segue o padrão da tag — {n} vira a posição, ex.: "Salvador 4"'],
+              ['Participantes', 'Os números já conhecidos dos grupos da tag entram no grupo novo'],
+              ['Agendamentos', 'Os pendentes do grupo anterior são copiados, se você deixar marcado'],
+              ['Link de entrada', 'Passa a apontar para o grupo novo na mesma hora'],
+              ['Aviso', 'Uma mensagem é enviada no grupo de gestão contando o que foi criado']
+            ]}
+          />
+
+          <p className="text-muted-foreground">
+            A verificação roda a cada 5 minutos e também no instante em que alguém
+            clica no link — então a vaga nunca falta, mesmo num pico de entradas.
+            Desligue a criação automática e a tag apenas organiza, sem criar nada.
+          </p>
+
+          <div className="text-sm rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+            <p className="text-muted-foreground">
+              A instância precisa ser <strong>administradora</strong> dos grupos para
+              conseguir o link de convite, e o WhatsApp não cria grupo vazio — por isso
+              o grupo novo nasce com os números que o sistema já conhece. Se nenhum
+              grupo da tag estiver sincronizado, a criação falha com essa mensagem.
+            </p>
+          </div>
+        </Secao>
+
+        <Secao
+          id="alertas"
+          icone={<Bell className="w-5 h-5" />}
+          titulo="Alertas e relatório diário"
+          descricao="O sistema avisa no WhatsApp quando algo falha, e resume o dia às 23:59."
+        >
+          <p>
+            Escolha o grupo que recebe os avisos em{' '}
+            <a href="/relatorios" className="underline">Relatórios</a>. Sem grupo
+            escolhido, nada é enviado.
+          </p>
+
+          <p className="font-medium pt-1">Aviso de falha</p>
+          <p>
+            Quando um agendamento termina em erro, chega uma mensagem com o grupo, a
+            instância, o tipo da ação, o horário, o erro cru, <strong>a causa provável
+            e o caminho da solução</strong> — mais um botão que abre direto o
+            agendamento no painel.
+          </p>
+          <p className="text-muted-foreground">
+            O aviso sai uma vez por agendamento, nunca em repetição. E não avisa sobre
+            erros no próprio grupo de gestão, para não virar eco.
+          </p>
+
+          <p className="font-medium pt-1">Relatório das 23:59</p>
+          <Tabela
+            cabecalho={['Métrica', 'O que mostra']}
+            linhas={[
+              ['Enviados / falhas / pulados', 'Total do dia e a quebra por instância e por grupo'],
+              ['Mensagens vs ações', 'Quanto foi envio e quanto foi mudança de grupo'],
+              ['Por tipo', 'Texto, mídia, botões, enquete, permissão e edição'],
+              ['Cliques', 'Total e ranking dos links mais abertos, com o grupo de origem'],
+              ['Enquetes', 'Pergunta, opções e votos de cada enquete disparada no dia'],
+              ['Movimento de membros', 'Quantas pessoas entraram e saíram, por grupo'],
+              ['Falhas', 'Lista com atalho para resolver cada uma']
+            ]}
+          />
+          <p className="text-muted-foreground">
+            No WhatsApp chega o resumo com um botão para o relatório completo, que é
+            uma página do painel com barras comparativas em{' '}
+            <code className="text-xs">/relatorios/AAAA-MM-DD</code>. Dá para abrir
+            qualquer dia pelo seletor de data.
+          </p>
+          <p className="text-muted-foreground">
+            O movimento de membros compara a contagem de hoje com a de ontem, então
+            ele começa a aparecer a partir do segundo dia de uso.
+          </p>
+        </Secao>
+
+        <Secao
           id="api"
           icone={<Plug className="w-5 h-5" />}
           titulo="API"
@@ -667,6 +769,11 @@ export default function DocsContent() {
               ['POST /api/bulk/profile', 'Edição em massa (aceita dryRun para prévia)'],
               ['POST /api/bulk/profile/{id}/undo', 'Desfaz um lote de edição em massa'],
               ['GET /api/links', 'Links rastreados e contagem de cliques'],
+              ['GET /api/tags', 'Tags, grupos vinculados e situação de lotação'],
+              ['POST /api/tags', 'Cria uma tag'],
+              ['POST /api/tags/{id}/groups', 'Define os grupos da tag, na ordem da fila'],
+              ['GET /api/reports/{data}', 'Relatório de um dia (YYYY-MM-DD)'],
+              ['GET /api/settings', 'Grupo de alertas e interruptores'],
               ['POST /api/upload', 'Envia um arquivo e devolve o caminho para usar em media ou picture']
             ]}
           />

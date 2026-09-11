@@ -1,5 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
 const { runGroupTask } = require('./shared/group-tasks');
+const ops = require('./shared/ops');
+const capacidade = require('./shared/capacity');
+const relatorio = require('./shared/report');
 const prisma = new PrismaClient();
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
@@ -274,7 +277,8 @@ async function processSchedules() {
               where: { id: schedule.id },
               data: {
                 status: 'sent',
-                evolutionMessageId: data.key?.id || data.data?.key?.id || data.id || null
+                // A Evolution devolve {data:{Info:{ID}}}; as demais formas ficam de reserva
+                evolutionMessageId: ops.extrairIdMensagem(data)
               }
             });
             console.log(`[Worker] Enviado agendamento ${schedule.id} para grupo ${evolutionGroupId}`);
@@ -454,11 +458,131 @@ async function dailySync() {
   }
 }
 
+/**
+ * Avisa no grupo de gestao sobre agendamentos que acabaram em erro e ainda
+ * nao foram comunicados. Roda junto do laco normal, entao o aviso sai em
+ * ate 10 segundos depois da falha.
+ */
+async function avisarErrosPendentes() {
+  try {
+    const comErro = await prisma.schedule.findMany({
+      where: { status: 'error' },
+      include: { group: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 20
+    });
+
+    for (const s of comErro) {
+      await ops.alertarErroDeAgendamento(prisma, s, s.group);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao avisar falhas:', e);
+  }
+}
+
+/** Guarda a contagem de membros do dia, base do "quantas pessoas entraram". */
+async function registrarSnapshotDiario() {
+  try {
+    const hoje = ops.hojeSP();
+    const grupos = await prisma.group.findMany({
+      select: { id: true, participantCount: true }
+    });
+
+    for (const g of grupos) {
+      await prisma.groupDailySnapshot.upsert({
+        where: { groupId_date: { groupId: g.id, date: hoje } },
+        update: { memberCount: g.participantCount || 0 },
+        create: { groupId: g.id, date: hoje, memberCount: g.participantCount || 0 }
+      });
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao gravar snapshot diario:', e);
+  }
+}
+
+let ultimoRelatorio = null;
+
+/**
+ * Relatorio diario as 23:59 no fuso de Sao Paulo.
+ * O AlertLog garante que sai uma vez por dia mesmo se o worker reiniciar.
+ */
+async function relatorioDiario() {
+  try {
+    const ligado = await ops.lerAjuste(prisma, ops.CHAVE_RELATORIO_ON, 'true');
+    if (ligado !== 'true') return;
+
+    const { h, m } = ops.agoraSP();
+    if (h !== 23 || m < 59) return;
+
+    const hoje = ops.hojeSP();
+    if (ultimoRelatorio === hoje) return;
+
+    const jaEnviado = await prisma.alertLog.findUnique({
+      where: { kind_refId: { kind: 'daily_report', refId: hoje } }
+    }).catch(() => null);
+    if (jaEnviado) { ultimoRelatorio = hoje; return; }
+
+    const destino = await ops.grupoDeAlerta(prisma);
+    if (!destino) return;
+
+    // Garante que o snapshot do dia existe antes de calcular o crescimento
+    await registrarSnapshotDiario();
+
+    const rel = await relatorio.montarRelatorio(prisma, hoje);
+    const texto = relatorio.resumoTexto(rel);
+
+    const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+    const enviado = await ops.enviarParaGrupo(
+      destino,
+      texto,
+      base
+        ? { displayText: 'Ver relatório completo', url: `${base}/relatorios/${hoje}`, title: 'Relatório diário' }
+        : null
+    );
+
+    if (enviado.ok) {
+      ultimoRelatorio = hoje;
+      await prisma.alertLog.create({
+        data: { kind: 'daily_report', refId: hoje, detail: `${rel.totais.enviados} enviados` }
+      }).catch(() => {});
+      console.log(`[Worker] Relatorio diario de ${hoje} enviado.`);
+    } else {
+      console.error('[Worker] Falha ao enviar relatorio:', enviado.erro);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro no relatorio diario:', e);
+  }
+}
+
+/** Cria o proximo grupo das tags cujos grupos encheram. */
+async function manterVagas() {
+  try {
+    const eventos = await capacidade.manterVagasAbertas(prisma);
+    for (const e of eventos) {
+      if (e.ok) console.log(`[Worker] Tag ${e.tag}: grupo "${e.nome}" criado com ${e.copiados} agendamento(s).`);
+      else console.error(`[Worker] Tag ${e.tag}: ${e.erro}`);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao manter vagas:', e);
+  }
+}
+
 // Run every 10 seconds
 setInterval(() => {
   processSchedules();
+  avisarErrosPendentes();
+  relatorioDiario();
   dailySync();
 }, 10000);
 console.log('[Worker] Iniciado com sucesso. Verificando agendamentos...');
 processSchedules();
+avisarErrosPendentes();
+registrarSnapshotDiario();
 dailySync();
+
+// Rotinas mais lentas: lotacao das tags e contagem diaria de membros.
+setInterval(() => {
+  manterVagas();
+  registrarSnapshotDiario();
+}, 5 * 60 * 1000);
+manterVagas();

@@ -14,22 +14,27 @@ model User {
 }
 
 model Group {
-  id                 String        @id @default(uuid())
-  slug               String        @unique
+  id                 String               @id @default(uuid())
+  slug               String               @unique
   name               String
   description        String?
   picture            String?
   evolutionGroupId   String? // O JID do grupo
   instanceName       String? // O nome da instância da Evolution GO
   pictureUpdatedAt   DateTime? // Quando a foto foi baixada (URL do WhatsApp expira)
-  participantCount   Int           @default(0)
-  isAnnounce         Boolean       @default(false) // true = só admins falam
-  isLocked           Boolean       @default(false) // true = só admins editam a info
-  isApprovalRequired Boolean       @default(false)
-  adminOnlyAdd       Boolean       @default(false)
+  participantCount   Int                  @default(0)
+  isAnnounce         Boolean              @default(false) // true = só admins falam
+  isLocked           Boolean              @default(false) // true = só admins editam a info
+  isApprovalRequired Boolean              @default(false)
+  adminOnlyAdd       Boolean              @default(false)
   ownerPhone         String?
   topic              String?
+  inviteLink         String? // link de convite do WhatsApp
+  inviteLinkAt       DateTime?
+  isFull             Boolean              @default(false) // atingiu a capacidade da tag
   members            GroupMember[]
+  tags               GroupTag[]
+  snapshots          GroupDailySnapshot[]
   schedules          Schedule[]
   messages           Message[]
 
@@ -130,4 +135,71 @@ model LinkClick {
   link      TrackedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
   @@index([linkId, clickedAt])
+}
+
+/// Agrupa grupos por caracteristica (cidade, unidade, servico...).
+/// Tambem carrega a regra de lotacao: quando o grupo ativo enche, o proximo
+/// e criado automaticamente e o link de convite passa a apontar para ele.
+model Tag {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  slug           String   @unique
+  color          String   @default("#6366f1")
+  description    String?
+  // --- gestao de lotacao ---
+  autoCreate     Boolean  @default(false)
+  capacity       Int      @default(950)
+  namePattern    String? // ex.: "Salvador {n}" — {n} vira a posicao do grupo
+  cloneSchedules Boolean  @default(true)
+  instanceName   String? // instancia usada para criar os grupos novos
+  inviteCode     String?  @unique // codigo do link publico /g/{codigo}
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  groups GroupTag[]
+}
+
+model GroupTag {
+  groupId   String
+  tagId     String
+  position  Int      @default(0) // ordem de preenchimento dentro da tag
+  createdAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, tagId])
+  @@index([tagId])
+}
+
+/// Contagem diaria de membros, para saber quantas pessoas entraram no dia.
+model GroupDailySnapshot {
+  id          String   @id @default(uuid())
+  groupId     String
+  date        String // YYYY-MM-DD no fuso de Sao Paulo
+  memberCount Int
+  createdAt   DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, date])
+  @@index([date])
+}
+
+/// Configuracao do painel em pares chave/valor (grupo de alertas, etc).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Alerta ja enviado, para nao repetir o aviso do mesmo erro.
+model AlertLog {
+  id     String   @id @default(uuid())
+  kind   String // schedule_error | daily_report | tag_autocreate
+  refId  String? // id do agendamento, da tag, ou a data do relatorio
+  sentAt DateTime @default(now())
+  detail String?
+
+  @@unique([kind, refId])
 }

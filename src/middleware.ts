@@ -7,7 +7,7 @@ export async function middleware(request: NextRequest) {
 
   // Public routes that don't require authentication
   // '/l' e o encurtador: quem clica no WhatsApp nao tem sessao
-  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/uploads', '/l/']
+  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/uploads', '/l/', '/g/']
   const isPublic = publicRoutes.some(route => pathname.startsWith(route))
   
   // Static assets and internal next routes

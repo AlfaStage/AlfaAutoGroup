@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
@@ -676,6 +676,18 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               <PencilRuler className="w-4 h-4 mr-2" />
               {modoSelecao ? 'Cancelar seleção' : 'Editar em massa'}
             </Button>
+            <Link href="/tags" className="flex-none">
+              <Button variant="ghost" className="w-full" title="Tags e gestão de lotação">
+                <TagIcon className="w-4 h-4 mr-2" />
+                Tags
+              </Button>
+            </Link>
+            <Link href="/relatorios" className="flex-none">
+              <Button variant="ghost" className="w-full" title="Relatório diário">
+                <BarChart3 className="w-4 h-4 mr-2" />
+                Relatórios
+              </Button>
+            </Link>
             <Link href="/links" className="flex-none">
               <Button variant="ghost" className="w-full" title="Cliques nos links">
                 <MousePointerClick className="w-4 h-4 mr-2" />
