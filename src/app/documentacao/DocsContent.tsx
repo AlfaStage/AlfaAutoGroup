@@ -108,7 +108,7 @@ const INDICE = [
 
 export default function DocsContent() {
   return (
-    <div className="container mx-auto px-4 py-6 grid lg:grid-cols-[220px_1fr] gap-6 items-start">
+    <div className="grid lg:grid-cols-[220px_1fr] gap-6 items-start">
       {/* Índice */}
       <nav className="hidden lg:block sticky top-24 space-y-1">
         {INDICE.map(item => (

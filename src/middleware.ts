@@ -17,6 +17,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/manifest') ||
     pathname.startsWith('/icons') ||
     pathname.startsWith('/sw.js') ||
+    pathname.startsWith('/offline.html') ||
     pathname.endsWith('.png') ||
     pathname.endsWith('.ico')
   ) {

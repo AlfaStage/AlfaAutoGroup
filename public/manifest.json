@@ -1,22 +1,59 @@
 {
-  "name": "AlfaAutoGroup",
-  "short_name": "AlfaAuto",
-  "description": "Sistema PWA de Gestão e Controle de Grupos",
+  "name": "AlfaAltoGrup — Gestão de Grupos",
+  "short_name": "AlfaAltoGrup",
+  "description": "Gestão, agendamento e disparo em grupos de WhatsApp",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "background_color": "#0f1115",
-  "theme_color": "#4ade80",
-  "orientation": "any",
+  "theme_color": "#0f1115",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Relatório de hoje",
+      "short_name": "Relatório",
+      "description": "Envios, falhas e cliques do dia",
+      "url": "/relatorios",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Tags e lotação",
+      "short_name": "Tags",
+      "description": "Grupos por característica e fila de entrada",
+      "url": "/tags",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Cliques em links",
+      "short_name": "Cliques",
+      "description": "Quantas vezes cada link foi aberto",
+      "url": "/links",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

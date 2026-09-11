@@ -3,13 +3,17 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import BulkEditModal from './BulkEditModal'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3 } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
@@ -124,6 +128,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false)
+  // Busca na lista de grupos: com dezenas de grupos, rolar nao resolve.
+  const [buscaGrupos, setBuscaGrupos] = useState('')
   // Selecao para edicao em massa
   const [modoSelecao, setModoSelecao] = useState(false)
   const [selecionados, setSelecionados] = useState<string[]>([])
@@ -537,10 +543,17 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
   }
 
-  const filteredGroups = selectedInstance 
-    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name)) 
+  const gruposDaInstancia = selectedInstance
+    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name))
     : []
-    
+
+  const termoBusca = buscaGrupos.trim().toLowerCase()
+  const filteredGroups = termoBusca
+    ? gruposDaInstancia.filter(g =>
+        g.name.toLowerCase().includes(termoBusca) ||
+        (g.description || '').toLowerCase().includes(termoBusca))
+    : gruposDaInstancia
+
   const filteredGroupsForPaste = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermPaste.toLowerCase()))
   const filteredGroupsForCreate = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermCreate.toLowerCase()))
   const totalGroups = filteredGroups.length
@@ -555,50 +568,51 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       
-      {/* Top Control Bar */}
-      <Card className="border-border/40 shadow-sm bg-card/60 backdrop-blur-sm">
-        <CardContent className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <Label className="font-semibold text-muted-foreground">Instância:</Label>
-            <div className="flex gap-2">
-              <Select value={selectedInstance} onValueChange={setSelectedInstance}>
-                <SelectTrigger className="w-full md:w-[200px]">
-                  <SelectValue placeholder="Selecione a instância..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {instances.map((inst, i) => {
-                    const name = inst.instance?.instanceName || inst.name;
-                    return <SelectItem key={i} value={name}>{name}</SelectItem>
-                  })}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="icon" onClick={() => setIsInstanceModalOpen(true)} title="Nova Instância">
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
+      {/* Instância e conexão: a primeira pergunta é sempre "está no ar?" */}
+      <Card className={`border-border/40 shadow-sm backdrop-blur-sm transition-colors ${
+        connectionState === 'open' ? 'bg-card/60' : 'bg-red-500/5 border-red-500/30'
+      }`}>
+        <CardContent className="p-4 flex flex-wrap items-center gap-3">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+            connectionState === 'open'
+              ? 'bg-green-500/10 text-green-500'
+              : connectionState === 'connecting'
+                ? 'bg-yellow-500/10 text-yellow-500'
+                : 'bg-red-500/10 text-red-500'
+          }`}>
+            {connectionState === 'open'
+              ? <Wifi className="w-4 h-4" />
+              : <WifiOff className="w-4 h-4" />}
+            {connectionState === 'open' ? 'Conectado' : connectionState === 'connecting' ? 'Conectando…' : 'Desconectado'}
           </div>
 
-          {selectedInstance && (
-            <div className="flex items-center gap-4 border-t md:border-t-0 md:border-l border-border/50 pt-4 md:pt-0 md:pl-4 w-full md:w-auto">
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${connectionState === 'open' ? 'bg-green-500 text-green-500' : (connectionState === 'connecting' ? 'bg-yellow-400 text-yellow-400' : 'bg-red-500 text-red-500')}`} />
-                <span className="text-sm font-medium">
-                  {connectionState === 'open' ? 'Conectado' : (connectionState === 'connecting' ? 'Conectando...' : 'Desconectado')}
-                </span>
-              </div>
-              
-              {connectionState !== 'open' && (
-                <Button variant="outline" size="sm" onClick={handleOpenQrCode} className="ml-auto md:ml-0">
-                  <QrCode className="w-4 h-4 mr-2" />
-                  QR Code
-                </Button>
-              )}
-            </div>
-          )}
+          <Select value={selectedInstance} onValueChange={setSelectedInstance}>
+            <SelectTrigger className="w-full sm:w-[220px]">
+              <SelectValue placeholder="Selecione a instância…" />
+            </SelectTrigger>
+            <SelectContent>
+              {instances.map((inst, i) => {
+                const name = inst.instance?.instanceName || inst.name;
+                return <SelectItem key={i} value={name}>{name}</SelectItem>
+              })}
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-2 ml-auto">
+            {connectionState !== 'open' && selectedInstance && (
+              <Button variant="default" size="sm" onClick={handleOpenQrCode}>
+                <QrCode className="w-4 h-4 mr-2" />
+                Conectar
+              </Button>
+            )}
+            <Button variant="outline" size="icon" onClick={() => setIsInstanceModalOpen(true)} title="Nova instância">
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Main Metrics */}
+      {/* Métricas do dia */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border-border/40 shadow-sm bg-green-500/5">
           <CardContent className="p-4 flex items-center justify-between">
@@ -648,73 +662,77 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
 
       {/* Groups Section */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h2 className="text-2xl font-bold tracking-tight">Meus Grupos</h2>
-          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-            <Button variant="outline" onClick={handleMassPasteClick} className="flex-none text-primary border-primary hover:bg-primary/10">
-              <ClipboardPaste className="w-4 h-4 mr-2" />
-              Colar
-            </Button>
-            <Button onClick={handleMassCreateClick} className="flex-none">
-              <Edit className="w-4 h-4 mr-2" />
-              Criar em Massa
-            </Button>
-            <Button variant="secondary" onClick={handleSyncGroups} className="flex-none">
-              <RefreshCcw className="w-4 h-4 mr-2" />
-              Sincronizar
-            </Button>
-            <Button variant="outline" onClick={() => setIsModalOpen(true)} className="flex-none">
-              <Plus className="w-4 h-4 mr-2" />
-              Adicionar
-            </Button>
-            <Button
-              variant={modoSelecao ? 'default' : 'outline'}
-              onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]) }}
-              className="flex-none"
-              title="Selecionar grupos para editar em massa"
-            >
-              <PencilRuler className="w-4 h-4 mr-2" />
-              {modoSelecao ? 'Cancelar seleção' : 'Editar em massa'}
-            </Button>
-            <Link href="/tags" className="flex-none">
-              <Button variant="ghost" className="w-full" title="Tags e gestão de lotação">
-                <TagIcon className="w-4 h-4 mr-2" />
-                Tags
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              {termoBusca
+                ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
+                : `${gruposDaInstancia.length} grupo(s)`}
+            </span>
+          </div>
+
+          {/* Busca primeiro: e o que mais se usa quando ha dezenas de grupos */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar grupo pelo nome ou descrição…"
+                value={buscaGrupos}
+                onChange={e => setBuscaGrupos(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Ação primária: é o que se faz todo dia */}
+              <Button variant="secondary" onClick={handleSyncGroups} className="flex-1 sm:flex-none">
+                <RefreshCcw className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Sincronizar</span>
               </Button>
-            </Link>
-            <Link href="/relatorios" className="flex-none">
-              <Button variant="ghost" className="w-full" title="Relatório diário">
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Relatórios
+
+              <Button onClick={() => setIsModalOpen(true)} className="flex-1 sm:flex-none">
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Novo grupo</span>
               </Button>
-            </Link>
-            <Link href="/links" className="flex-none">
-              <Button variant="ghost" className="w-full" title="Cliques nos links">
-                <MousePointerClick className="w-4 h-4 mr-2" />
-                Cliques
-              </Button>
-            </Link>
-            <Link href="/chaves" className="flex-none">
-              <Button variant="ghost" className="w-full" title="Chaves de API e MCP">
-                <KeyRound className="w-4 h-4 mr-2" />
-                Chaves
-              </Button>
-            </Link>
-            <Link href="/documentacao" className="flex-none">
-              <Button variant="ghost" className="w-full" title="Documentação do JSON, API e MCP">
-                <BookOpen className="w-4 h-4 mr-2" />
-                Docs
-              </Button>
-            </Link>
+
+              {/* O resto entra num menu, em vez de nove botões competindo */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" title="Mais ações">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]) }}>
+                    <PencilRuler className="w-4 h-4 mr-2" />
+                    {modoSelecao ? 'Cancelar seleção' : 'Editar nome, foto e descrição'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassCreateClick}>
+                    <Edit className="w-4 h-4 mr-2" />
+                    Agendar em massa
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassPasteClick}>
+                    <ClipboardPaste className="w-4 h-4 mr-2" />
+                    Colar agendamentos (JSON)
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Instância</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={handleOpenQrCode}>
+                    <QrCode className="w-4 h-4 mr-2" />
+                    QR Code de conexão
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Nova instância
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
-
-        <BulkEditModal
-          open={bulkAberto}
-          onOpenChange={setBulkAberto}
-          groupIds={selecionados}
-          onDone={() => { setModoSelecao(false); setSelecionados([]) }}
-        />
 
         {modoSelecao && (
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
