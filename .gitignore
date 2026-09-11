@@ -46,3 +46,6 @@ next-env.d.ts
 *.db-journal
 *.sqlite
 *.sqlite3
+
+# Cache de fotos e arquivos enviados (dados, nao codigo)
+uploads/
