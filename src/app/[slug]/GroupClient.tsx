@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 import GroupEditorModal from './GroupEditorModal'
 import ScheduleSummary from './ScheduleSummary'
 import { PERMISSION_GROUPS, PERMISSION_LABEL, actionsToPermissions, validateButtons } from '@/lib/schedule-types'
-import { ArrowLeft, UserCircle2, Settings, MessageSquare, Lock, Unlock, ShieldCheck, UserPlus, Loader2, Megaphone, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
+import { ArrowLeft, UserCircle2, Settings, MessageSquare, Lock, Unlock, ShieldCheck, UserPlus, Loader2, Megaphone, MousePointerClick, Tag as TagIcon, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
 
 const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
   const [offset, setOffset] = useState(value * 40);
@@ -561,9 +561,23 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                   {initialGroup.name.substring(0, 2).toUpperCase()}
                 </div>
               </div>
-              <div>
-                <h1 className="text-lg font-bold leading-tight">{initialGroup.name}</h1>
-                <p className="text-xs text-muted-foreground">{initialGroup.members?.length || 0} membros</p>
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold leading-tight truncate">{initialGroup.name}</h1>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-xs text-muted-foreground">{initialGroup.members?.length || 0} membros</p>
+                  {/* As tags do grupo levam direto para a gestão delas */}
+                  {(initialGroup.tags || []).map((v: any) => (
+                    <Link key={v.tag.id} href="/tags" title="Ver tags e lotação">
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 hover:opacity-80"
+                        style={{ borderColor: v.tag.color, color: v.tag.color }}
+                      >
+                        <TagIcon className="w-2.5 h-2.5" />
+                        {v.tag.name}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -768,6 +782,23 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                           {s.type === 'permission' && 'Mudança de permissões'}
                           {s.type === 'profile' && 'Edição do grupo'}
                         </p>
+
+                        {/* Cliques deste disparo, sem precisar ir ate a pagina de links */}
+                        {(s.links || []).length > 0 && (() => {
+                          const totalCliques = s.links.reduce(
+                            (soma: number, l: any) => soma + (l._count?.clicks || 0), 0
+                          )
+                          return (
+                            <Link href="/links" className="inline-block mt-1">
+                              <span className={`text-xs flex items-center gap-1 hover:underline ${
+                                totalCliques > 0 ? 'text-primary font-medium' : 'text-muted-foreground'
+                              }`}>
+                                <MousePointerClick className="w-3 h-3" />
+                                {totalCliques} clique(s) em {s.links.length} link(s)
+                              </span>
+                            </Link>
+                          )
+                        })()}
 
                         {content.mentionAll && ['text', 'media', 'button', 'poll'].includes(s.type) && (
                           <p className="text-xs text-primary mt-1 flex items-center gap-1">

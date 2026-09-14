@@ -16,8 +16,17 @@ export default async function GroupPage({ params }: { params: Promise<{ slug: st
     where: { slug: slug },
     include: {
       schedules: {
-        orderBy: { adjustedAt: 'asc' }
+        orderBy: { adjustedAt: 'asc' },
+        include: {
+          links: {
+            select: {
+              id: true, code: true, url: true, label: true,
+              _count: { select: { clicks: true } }
+            }
+          }
+        }
       },
+      tags: { include: { tag: { select: { id: true, name: true, color: true, slug: true } } } },
       members: true,
       messages: {
         orderBy: { timestamp: 'desc' },

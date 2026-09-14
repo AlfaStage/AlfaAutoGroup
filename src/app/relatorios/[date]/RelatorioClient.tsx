@@ -53,6 +53,9 @@ function Kpi({
 export default function RelatorioClient({ data }: { data: string }) {
   const router = useRouter()
   const [rel, setRel] = useState<Relatorio | null>(null)
+  // Filtro por tag: reaproveita o agrupamento que voce ja montou
+  const [tags, setTags] = useState<any[]>([])
+  const [tagFiltro, setTagFiltro] = useState<string>('')
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState('')
 
@@ -73,11 +76,26 @@ export default function RelatorioClient({ data }: { data: string }) {
 
   useEffect(() => { carregar() }, [carregar])
 
+  useEffect(() => {
+    fetch('/api/tags')
+      .then(r => (r.ok ? r.json() : []))
+      .then(d => setTags(Array.isArray(d) ? d : []))
+      .catch(() => { /* sem tags o relatorio segue igual */ })
+  }, [])
+
   const dataBonita = new Date(`${data}T12:00:00-03:00`).toLocaleDateString('pt-BR', {
     weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
   })
 
-  const maxGrupo = Math.max(1, ...(rel?.porGrupo || []).map((g: any) => g.enviados))
+  const tagEscolhida = tags.find((t: any) => t.id === tagFiltro)
+  const idsDaTag = tagEscolhida
+    ? new Set(tagEscolhida.grupos.map((g: any) => g.id))
+    : null
+
+  const gruposVisiveis = (rel?.porGrupo || [])
+    .filter((g: any) => !idsDaTag || idsDaTag.has(g.id))
+
+  const maxGrupo = Math.max(1, ...gruposVisiveis.map((g: any) => g.enviados))
   const maxInstancia = Math.max(1, ...(rel?.porInstancia || []).map((i: any) => i.enviados))
 
   return (
@@ -154,12 +172,32 @@ export default function RelatorioClient({ data }: { data: string }) {
           {/* ----------------------------------------------------- grupos */}
           <Card className="border-border/40 bg-card/40">
             <CardHeader className="border-b border-border/40 pb-4">
-              <CardTitle className="text-base">Por grupo</CardTitle>
-              <CardDescription>{rel.porGrupo.length} grupo(s) com atividade</CardDescription>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Por grupo</CardTitle>
+                  <CardDescription>
+                    {gruposVisiveis.length} grupo(s) com atividade
+                    {tagEscolhida ? ` na tag ${tagEscolhida.name}` : ''}
+                  </CardDescription>
+                </div>
+                {tags.length > 0 && (
+                  <Select value={tagFiltro || 'todas'} onValueChange={v => setTagFiltro(v === 'todas' ? '' : v)}>
+                    <SelectTrigger className="w-[190px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="todas">Todas as tags</SelectItem>
+                      {tags.map((t: any) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="pt-4">
               <div className="space-y-2 max-h-[420px] overflow-y-auto">
-                {rel.porGrupo.map((g: any) => (
+                {gruposVisiveis.map((g: any) => (
                   <div key={g.id || g.nome} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/20">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm truncate">{g.nome}</p>
@@ -180,7 +218,7 @@ export default function RelatorioClient({ data }: { data: string }) {
                     )}
                   </div>
                 ))}
-                {rel.porGrupo.length === 0 && (
+                {gruposVisiveis.length === 0 && (
                   <p className="text-sm text-muted-foreground">Nada aconteceu neste dia.</p>
                 )}
               </div>

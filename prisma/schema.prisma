@@ -56,20 +56,21 @@ model GroupMember {
 }
 
 model Schedule {
-  id                 String   @id @default(uuid())
+  id                 String        @id @default(uuid())
   groupId            String
   type               String // text, media, button, poll, permission, profile
   content            String // JSON string
   scheduledAt        DateTime // Original requested time
   adjustedAt         DateTime // Adjusted time for anti-ban
-  status             String   @default("pending") // pending, sent, skipped, deactivated, error, processing
+  status             String        @default("pending") // pending, sent, skipped, deactivated, error, processing
   errorMessage       String?
   evolutionMessageId String?
-  attempts           Int      @default(0)
+  attempts           Int           @default(0)
   skipReason         String? // preenchido quando o grupo ja estava no estado pedido
   appliedInfo        String? // JSON com o que foi de fato aplicado
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  links              TrackedLink[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   group Group @relation(fields: [groupId], references: [id])
 }
@@ -119,11 +120,13 @@ model TrackedLink {
   label      String?
   groupId    String?
   scheduleId String?
+  schedule   Schedule?   @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   active     Boolean     @default(true)
   createdAt  DateTime    @default(now())
   clicks     LinkClick[]
 
   @@index([groupId])
+  @@index([scheduleId])
 }
 
 model LinkClick {

@@ -133,6 +133,15 @@ export async function POST(request: Request) {
           status: 'pending'
         }
       })
+      // Amarra os links rastreados ao agendamento, para o painel mostrar os
+      // cliques daquele disparo sem precisar cruzar nada na mao.
+      if (rastreado.links.length) {
+        await prisma.trackedLink.updateMany({
+          where: { id: { in: rastreado.links.map((l: any) => l.id) } },
+          data: { scheduleId: schedule.id }
+        })
+      }
+
       createdSchedules.push(schedule)
       
       // Update requestedTime slightly for the next iteration to simulate base shift

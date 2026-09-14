@@ -23,7 +23,13 @@ Aponte dois registros **A** para o IP público da VM:
 ```bash
 cp deploy/env.prod.example deploy/.env
 # preencha os segredos (openssl rand -hex 32)
-cd deploy && docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+cd deploy
+
+# Construa UMA vez: web e worker compartilham a mesma imagem.
+# Pedir --build para os dois dispara dois `next build` em paralelo, que numa
+# VM de 1 GB brigam por memoria e levam o triplo do tempo.
+docker compose -f docker-compose.prod.yml --env-file .env build web
+docker compose -f docker-compose.prod.yml --env-file .env up -d
 ```
 
 O Caddy emite os certificados Let's Encrypt sozinho assim que o DNS propagar.
