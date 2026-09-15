@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# Build multi-stage: a imagem final leva so o runtime (standalone), sem toolchain.
+FROM node:20-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# ---------- dependencias ----------
+FROM base AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+# ---------- build ----------
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV DATABASE_URL="file:./prisma/dev.db"
+ARG AI_API_KEY=""
+ENV AI_API_KEY=${AI_API_KEY}
+RUN npx prisma generate
+RUN npm run build
+
+# ---------- runtime ----------
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0 \
+    TZ=America/Sao_Paulo
+
+RUN groupadd -g 1001 app && useradd -u 1001 -g app -m app
+
+# Saida standalone do Next: traz so os modulos realmente usados
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+
+# Prisma (client + engines) e deps do worker/seed
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/bcryptjs ./node_modules/bcryptjs
+COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
+
+COPY --from=builder /app/prisma/schema.prisma ./schema.prisma.new
+COPY --from=builder /app/worker.js /app/seed.js ./
+# Executor compartilhado entre as rotas do Next e o worker
+COPY --from=builder /app/shared ./shared
+
+RUN mkdir -p /app/prisma /app/uploads && chown -R app:app /app
+USER app
+
+EXPOSE 3000
+CMD ["node", "server.js"]

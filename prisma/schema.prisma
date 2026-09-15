@@ -14,41 +14,64 @@ model User {
 }
 
 model Group {
-  id               String     @id @default(uuid())
-  slug             String     @unique
-  name             String
-  description      String?
-  picture          String?
-  evolutionGroupId String?    // O JID do grupo
-  instanceName     String?    // O nome da instância da Evolution GO
-  members          GroupMember[]
-  schedules        Schedule[]
-  messages         Message[]
+  id                 String               @id @default(uuid())
+  slug               String               @unique
+  name               String
+  description        String?
+  picture            String?
+  evolutionGroupId   String? // O JID do grupo
+  instanceName       String? // O nome da instância da Evolution GO
+  pictureUpdatedAt   DateTime? // Quando a foto foi baixada (URL do WhatsApp expira)
+  participantCount   Int                  @default(0)
+  isAnnounce         Boolean              @default(false) // true = só admins falam
+  isLocked           Boolean              @default(false) // true = só admins editam a info
+  isApprovalRequired Boolean              @default(false)
+  adminOnlyAdd       Boolean              @default(false)
+  ownerPhone         String?
+  topic              String?
+  inviteLink         String? // link de convite do WhatsApp
+  inviteLinkAt       DateTime?
+  isFull             Boolean              @default(false) // atingiu a capacidade da tag
+  members            GroupMember[]
+  tags               GroupTag[]
+  snapshots          GroupDailySnapshot[]
+  schedules          Schedule[]
+  messages           Message[]
 
   @@unique([instanceName, evolutionGroupId])
 }
 
 model GroupMember {
-  id      String @id @default(uuid())
-  groupId String
-  phone   String
-  role    String @default("participant") // admin, participant
-  group   Group  @relation(fields: [groupId], references: [id])
+  id           String  @id @default(uuid())
+  groupId      String
+  phone        String // número real, sem sufixo (vem de Participants[].PhoneNumber)
+  lid          String? // identificador anônimo do WhatsApp, quando existe
+  displayName  String?
+  isAdmin      Boolean @default(false)
+  isSuperAdmin Boolean @default(false)
+  role         String  @default("participant") // admin, participant
+  group        Group   @relation(fields: [groupId], references: [id])
+
+  @@index([groupId])
 }
 
 model Schedule {
-  id                 String   @id @default(uuid())
+  id                 String        @id @default(uuid())
   groupId            String
-  type               String   // text, media, button, poll
-  content            String   // JSON string
+  type               String // text, media, button, poll, permission, profile
+  content            String // JSON string
   scheduledAt        DateTime // Original requested time
   adjustedAt         DateTime // Adjusted time for anti-ban
-  status             String   @default("pending") // pending, sent, deactivated, error, processing
+  status             String        @default("pending") // pending, sent, skipped, deactivated, error, processing
   errorMessage       String?
   evolutionMessageId String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  
+  attempts           Int           @default(0)
+  skipReason         String? // preenchido quando o grupo ja estava no estado pedido
+  appliedInfo        String? // JSON com o que foi de fato aplicado
+  links              TrackedLink[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
   group Group @relation(fields: [groupId], references: [id])
 }
 
@@ -56,8 +79,131 @@ model Message {
   id        String   @id @default(uuid())
   groupId   String
   sender    String
-  content   String   // JSON or text
+  content   String // JSON or text
   timestamp DateTime @default(now())
 
   group Group @relation(fields: [groupId], references: [id])
+}
+
+/// Chave de API para acesso externo (REST e MCP).
+/// Guardamos só o hash: a chave em texto aparece uma única vez, na criação.
+model ApiKey {
+  id         String    @id @default(uuid())
+  name       String
+  prefix     String    @unique // primeiros caracteres, para identificar na lista
+  hash       String    @unique // sha256 da chave completa
+  scopes     String    @default("read,write")
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([revokedAt])
+}
+
+/// Um lote de edicao em massa. Guarda o estado anterior dos grupos para
+/// permitir desfazer — a foto nao entra no snapshot, so nome e descricao.
+model BulkEdit {
+  id        String    @id @default(uuid())
+  payload   String // JSON com o que foi pedido (template, descricao, foto)
+  snapshot  String // JSON: [{groupId, name, topic}] antes da mudanca
+  total     Int
+  undoneAt  DateTime?
+  createdAt DateTime  @default(now())
+}
+
+/// Link encurtado com contagem de cliques.
+/// O destino real fica em `url`; o painel publica /l/{code}.
+model TrackedLink {
+  id         String      @id @default(uuid())
+  code       String      @unique
+  url        String
+  label      String?
+  groupId    String?
+  scheduleId String?
+  schedule   Schedule?   @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  active     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  clicks     LinkClick[]
+
+  @@index([groupId])
+  @@index([scheduleId])
+}
+
+model LinkClick {
+  id        String      @id @default(uuid())
+  linkId    String
+  clickedAt DateTime    @default(now())
+  userAgent String?
+  referer   String?
+  link      TrackedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([linkId, clickedAt])
+}
+
+/// Agrupa grupos por caracteristica (cidade, unidade, servico...).
+/// Tambem carrega a regra de lotacao: quando o grupo ativo enche, o proximo
+/// e criado automaticamente e o link de convite passa a apontar para ele.
+model Tag {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  slug           String   @unique
+  color          String   @default("#6366f1")
+  description    String?
+  // --- gestao de lotacao ---
+  autoCreate     Boolean  @default(false)
+  capacity       Int      @default(950)
+  namePattern    String? // ex.: "Salvador {n}" — {n} vira a posicao do grupo
+  cloneSchedules Boolean  @default(true)
+  copyAdmins     Boolean  @default(true) // admins comuns da tag entram e viram admin no grupo novo
+  instanceName   String? // instancia usada para criar os grupos novos
+  inviteCode     String?  @unique // codigo do link publico /g/{codigo}
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  groups GroupTag[]
+}
+
+model GroupTag {
+  groupId   String
+  tagId     String
+  position  Int      @default(0) // ordem de preenchimento dentro da tag
+  createdAt DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, tagId])
+  @@index([tagId])
+}
+
+/// Contagem diaria de membros, para saber quantas pessoas entraram no dia.
+model GroupDailySnapshot {
+  id          String   @id @default(uuid())
+  groupId     String
+  date        String // YYYY-MM-DD no fuso de Sao Paulo
+  memberCount Int
+  createdAt   DateTime @default(now())
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, date])
+  @@index([date])
+}
+
+/// Configuracao do painel em pares chave/valor (grupo de alertas, etc).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+/// Alerta ja enviado, para nao repetir o aviso do mesmo erro.
+model AlertLog {
+  id     String   @id @default(uuid())
+  kind   String // schedule_error | daily_report | tag_autocreate
+  refId  String? // id do agendamento, da tag, ou a data do relatorio
+  sentAt DateTime @default(now())
+  detail String?
+
+  @@unique([kind, refId])
 }

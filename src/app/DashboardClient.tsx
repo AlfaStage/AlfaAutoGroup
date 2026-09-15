@@ -2,13 +2,19 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import BulkEditModal from './BulkEditModal'
+import SeletorDeGrupos from '@/components/SeletorDeGrupos'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
@@ -123,6 +129,16 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false)
+  // Busca na lista de grupos: com dezenas de grupos, rolar nao resolve.
+  const [buscaGrupos, setBuscaGrupos] = useState('')
+  // Filtro por tag
+  const [tagFiltro, setTagFiltro] = useState<string>('todas')
+  // Selecao para edicao em massa
+  const [modoSelecao, setModoSelecao] = useState(false)
+  const [selecionados, setSelecionados] = useState<string[]>([])
+  const [bulkAberto, setBulkAberto] = useState(false)
+  // Tags usadas como atalho de seleção na barra de edição em massa e no filtro
+  const [tagsDoPainel, setTagsDoPainel] = useState<any[]>([])
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [qrCodeBase64, setQrCodeBase64] = useState<string>('')
   
@@ -167,6 +183,13 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const updateSchedule = (index: number, updates: any) => {
     setNewSchedules(prev => prev.map((s, i) => i === index ? { ...s, ...updates } : s))
   }
+
+  useEffect(() => {
+    fetch('/api/tags')
+      .then(r => (r.ok ? r.json() : []))
+      .then(d => setTagsDoPainel(Array.isArray(d) ? d : []))
+      .catch(() => { /* sem tags o painel segue normal */ })
+  }, [])
 
   // Fetch instances on mount
   useEffect(() => {
@@ -228,7 +251,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
 
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    // 30s: a 5s o polling empilhava chamadas na Evolution e derrubava o keepalive
+    const interval = setInterval(checkStatus, 30000);
     return () => clearInterval(interval);
   }, [selectedInstance, instances])
 
@@ -531,10 +555,24 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     }
   }
 
-  const filteredGroups = selectedInstance 
-    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name)) 
+  const gruposDaInstancia = selectedInstance
+    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name))
     : []
-    
+
+  const termoBusca = buscaGrupos.trim().toLowerCase()
+  const filteredGroups = gruposDaInstancia.filter(g => {
+    const matchesBusca = !termoBusca || (
+      g.name.toLowerCase().includes(termoBusca) ||
+      (g.description || '').toLowerCase().includes(termoBusca)
+    )
+    const matchesTag = tagFiltro === 'todas' || (
+      Array.isArray(g.tags) && g.tags.some((gt: any) =>
+        gt.tagId === tagFiltro || gt.tag?.id === tagFiltro || gt.tag?.slug === tagFiltro
+      )
+    )
+    return matchesBusca && matchesTag
+  })
+
   const filteredGroupsForPaste = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermPaste.toLowerCase()))
   const filteredGroupsForCreate = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermCreate.toLowerCase()))
   const totalGroups = filteredGroups.length
@@ -549,50 +587,51 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       
-      {/* Top Control Bar */}
-      <Card className="border-border/40 shadow-sm bg-card/60 backdrop-blur-sm">
-        <CardContent className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4 w-full md:w-auto">
-            <Label className="font-semibold text-muted-foreground">Instância:</Label>
-            <div className="flex gap-2">
-              <Select value={selectedInstance} onValueChange={setSelectedInstance}>
-                <SelectTrigger className="w-full md:w-[200px]">
-                  <SelectValue placeholder="Selecione a instância..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {instances.map((inst, i) => {
-                    const name = inst.instance?.instanceName || inst.name;
-                    return <SelectItem key={i} value={name}>{name}</SelectItem>
-                  })}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="icon" onClick={() => setIsInstanceModalOpen(true)} title="Nova Instância">
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
+      {/* Instância e conexão: a primeira pergunta é sempre "está no ar?" */}
+      <Card className={`border-border/40 shadow-sm backdrop-blur-sm transition-colors ${
+        connectionState === 'open' ? 'bg-card/60' : 'bg-red-500/5 border-red-500/30'
+      }`}>
+        <CardContent className="p-4 flex flex-wrap items-center gap-3">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+            connectionState === 'open'
+              ? 'bg-green-500/10 text-green-500'
+              : connectionState === 'connecting'
+                ? 'bg-yellow-500/10 text-yellow-500'
+                : 'bg-red-500/10 text-red-500'
+          }`}>
+            {connectionState === 'open'
+              ? <Wifi className="w-4 h-4" />
+              : <WifiOff className="w-4 h-4" />}
+            {connectionState === 'open' ? 'Conectado' : connectionState === 'connecting' ? 'Conectando…' : 'Desconectado'}
           </div>
 
-          {selectedInstance && (
-            <div className="flex items-center gap-4 border-t md:border-t-0 md:border-l border-border/50 pt-4 md:pt-0 md:pl-4 w-full md:w-auto">
-              <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${connectionState === 'open' ? 'bg-green-500 text-green-500' : (connectionState === 'connecting' ? 'bg-yellow-400 text-yellow-400' : 'bg-red-500 text-red-500')}`} />
-                <span className="text-sm font-medium">
-                  {connectionState === 'open' ? 'Conectado' : (connectionState === 'connecting' ? 'Conectando...' : 'Desconectado')}
-                </span>
-              </div>
-              
-              {connectionState !== 'open' && (
-                <Button variant="outline" size="sm" onClick={handleOpenQrCode} className="ml-auto md:ml-0">
-                  <QrCode className="w-4 h-4 mr-2" />
-                  QR Code
-                </Button>
-              )}
-            </div>
-          )}
+          <Select value={selectedInstance} onValueChange={setSelectedInstance}>
+            <SelectTrigger className="w-full sm:w-[220px]">
+              <SelectValue placeholder="Selecione a instância…" />
+            </SelectTrigger>
+            <SelectContent>
+              {instances.map((inst, i) => {
+                const name = inst.instance?.instanceName || inst.name;
+                return <SelectItem key={i} value={name}>{name}</SelectItem>
+              })}
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-2 ml-auto">
+            {connectionState !== 'open' && selectedInstance && (
+              <Button variant="default" size="sm" onClick={handleOpenQrCode}>
+                <QrCode className="w-4 h-4 mr-2" />
+                Conectar
+              </Button>
+            )}
+            <Button variant="outline" size="icon" onClick={() => setIsInstanceModalOpen(true)} title="Nova instância">
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Main Metrics */}
+      {/* Métricas do dia */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card className="border-border/40 shadow-sm bg-green-500/5">
           <CardContent className="p-4 flex items-center justify-between">
@@ -642,32 +681,175 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
 
       {/* Groups Section */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h2 className="text-2xl font-bold tracking-tight">Meus Grupos</h2>
-          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
-            <Button variant="outline" onClick={handleMassPasteClick} className="flex-none text-primary border-primary hover:bg-primary/10">
-              <ClipboardPaste className="w-4 h-4 mr-2" />
-              Colar
-            </Button>
-            <Button onClick={handleMassCreateClick} className="flex-none">
-              <Edit className="w-4 h-4 mr-2" />
-              Criar em Massa
-            </Button>
-            <Button variant="secondary" onClick={handleSyncGroups} className="flex-none">
-              <RefreshCcw className="w-4 h-4 mr-2" />
-              Sincronizar
-            </Button>
-            <Button variant="outline" onClick={() => setIsModalOpen(true)} className="flex-none">
-              <Plus className="w-4 h-4 mr-2" />
-              Adicionar
-            </Button>
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              {termoBusca
+                ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
+                : `${gruposDaInstancia.length} grupo(s)`}
+            </span>
+          </div>
+
+          {/* Busca e filtro por tags: e o que mais se usa quando ha dezenas de grupos */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar grupo pelo nome ou descrição…"
+                value={buscaGrupos}
+                onChange={e => setBuscaGrupos(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
+            {tagsDoPainel.length > 0 && (
+              <Select value={tagFiltro} onValueChange={setTagFiltro}>
+                <SelectTrigger className="w-full sm:w-[200px]">
+                  <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Todas as tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as tags</SelectItem>
+                  {tagsDoPainel.map(t => (
+                    <SelectItem key={t.id} value={t.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color || '#6366f1' }} />
+                        {t.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            <div className="flex items-center gap-2">
+              {/* Ação primária: é o que se faz todo dia */}
+              <Button variant="secondary" onClick={handleSyncGroups} className="flex-1 sm:flex-none">
+                <RefreshCcw className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Sincronizar</span>
+              </Button>
+
+              <Button onClick={() => setIsModalOpen(true)} className="flex-1 sm:flex-none">
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Novo grupo</span>
+              </Button>
+
+              {/* O resto entra num menu, em vez de nove botões competindo */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" title="Mais ações">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]) }}>
+                    <PencilRuler className="w-4 h-4 mr-2" />
+                    {modoSelecao ? 'Cancelar seleção' : 'Editar nome, foto e descrição'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassCreateClick}>
+                    <Edit className="w-4 h-4 mr-2" />
+                    Agendar em massa
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassPasteClick}>
+                    <ClipboardPaste className="w-4 h-4 mr-2" />
+                    Colar agendamentos (JSON)
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Instância</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={handleOpenQrCode}>
+                    <QrCode className="w-4 h-4 mr-2" />
+                    QR Code de conexão
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Nova instância
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
 
+        {modoSelecao && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelecionados(
+                  selecionados.length === filteredGroups.length
+                    ? []
+                    : filteredGroups.map((g: any) => g.id)
+                )}
+              >
+                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
+                  ? <CheckSquare className="w-4 h-4 mr-2" />
+                  : <Square className="w-4 h-4 mr-2" />}
+                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
+                  ? 'Desmarcar todos'
+                  : 'Marcar todos'}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {selecionados.length} grupo(s) selecionado(s)
+              </span>
+
+              {/* Atalhos por tag: um clique traz todos os grupos dela */}
+              {tagsDoPainel.map(t => {
+                const idsAqui = t.grupos
+                  .map((g: any) => g.id)
+                  .filter((id: string) => filteredGroups.some((fg: any) => fg.id === id))
+                if (idsAqui.length === 0) return null
+                const todosJa = idsAqui.every((id: string) => selecionados.includes(id))
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setSelecionados(
+                      todosJa
+                        ? selecionados.filter(id => !idsAqui.includes(id))
+                        : Array.from(new Set([...selecionados, ...idsAqui]))
+                    )}
+                    className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      todosJa ? 'border-transparent text-white' : 'border-border/60 bg-muted/20 hover:bg-muted/40'
+                    }`}
+                    style={todosJa ? { backgroundColor: t.color } : undefined}
+                    title={`Marcar os ${idsAqui.length} grupo(s) da tag ${t.name}`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: todosJa ? 'rgba(255,255,255,.85)' : t.color }}
+                    />
+                    {t.name}
+                    <span className="opacity-70">{idsAqui.length}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <Button disabled={selecionados.length === 0} onClick={() => setBulkAberto(true)}>
+              <PencilRuler className="w-4 h-4 mr-2" />
+              Editar selecionados
+            </Button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredGroups.map(g => (
-            <Link href={`/${g.slug}`} key={g.id}>
-              <Card className="group h-full border-border/40 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:-translate-y-1 bg-card/40 cursor-pointer">
+            <div
+              key={g.id}
+              onClick={modoSelecao ? () => setSelecionados(prev =>
+                prev.includes(g.id) ? prev.filter(i => i !== g.id) : [...prev, g.id]
+              ) : undefined}
+              className={modoSelecao ? 'cursor-pointer' : ''}
+            >
+            <ConditionalLink href={`/${g.slug}`} desativado={modoSelecao}>
+              <Card className={`group h-full border-border/40 transition-all duration-300 bg-card/40 cursor-pointer ${
+                modoSelecao && selecionados.includes(g.id)
+                  ? 'border-primary ring-2 ring-primary/40'
+                  : 'hover:border-primary/50 hover:shadow-lg hover:-translate-y-1'
+              }`}>
                 <CardHeader className="flex flex-row items-center gap-4 pb-2">
                   {g.picture ? (
                     <img src={g.picture} alt={g.name} className="w-12 h-12 rounded-lg object-cover ring-1 ring-border" />
@@ -679,6 +861,28 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   <div className="flex-1 overflow-hidden">
                     <CardTitle className="text-base truncate group-hover:text-primary transition-colors">{g.name}</CardTitle>
                     <CardDescription className="truncate text-xs">{g.description || 'Sem descrição'}</CardDescription>
+                    {Array.isArray(g.tags) && g.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {g.tags.map((gt: any) => {
+                          const tag = gt.tag || gt;
+                          if (!tag?.name) return null;
+                          return (
+                            <span
+                              key={tag.id || gt.tagId}
+                              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium border"
+                              style={{
+                                borderColor: tag.color ? `${tag.color}40` : '#6366f140',
+                                backgroundColor: tag.color ? `${tag.color}15` : '#6366f115',
+                                color: tag.color || '#6366f1'
+                              }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color || '#6366f1' }} />
+                              {tag.name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -721,7 +925,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   </div>
                 </CardContent>
               </Card>
-            </Link>
+            </ConditionalLink>
+            </div>
           ))}
           {filteredGroups.length === 0 && (
             <div className="col-span-full py-12 text-center text-muted-foreground bg-muted/10 rounded-lg border border-dashed border-border/50">
@@ -763,45 +968,14 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </div>
             
             <div className="space-y-2 pt-2">
-              <div className="flex items-center justify-between">
-                <Label>Selecione os Grupos Destino</Label>
-                <Button variant="ghost" size="sm" onClick={() => {
-                  const currentIds = filteredGroupsForPaste.map(g => g.id);
-                  const allSelected = currentIds.length > 0 && currentIds.every(id => selectedGroupsForPaste.includes(id));
-                  if (allSelected) {
-                    setSelectedGroupsForPaste(selectedGroupsForPaste.filter(id => !currentIds.includes(id)))
-                  } else {
-                    const newSelection = new Set([...selectedGroupsForPaste, ...currentIds]);
-                    setSelectedGroupsForPaste(Array.from(newSelection))
-                  }
-                }}>
-                  {filteredGroupsForPaste.length > 0 && filteredGroupsForPaste.every(g => selectedGroupsForPaste.includes(g.id)) ? 'Desmarcar Listados' : 'Selecionar Listados'}
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
-                {filteredGroupsForPaste.map(g => (
-                  <label key={g.id} className="flex items-start space-x-3 p-3 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
-                      checked={selectedGroupsForPaste.includes(g.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedGroupsForPaste([...selectedGroupsForPaste, g.id])
-                        } else {
-                          setSelectedGroupsForPaste(selectedGroupsForPaste.filter(id => id !== g.id))
-                        }
-                      }}
-                    />
-                    <span className="text-sm font-medium whitespace-normal break-words leading-tight flex-1">{g.name}</span>
-                  </label>
-                ))}
-                {filteredGroupsForPaste.length === 0 && (
-                  <div className="col-span-full text-center text-xs text-muted-foreground p-4">
-                    Nenhum grupo encontrado nesta instância.
-                  </div>
-                )}
-              </div>
+              <Label>Grupos de destino</Label>
+              <SeletorDeGrupos
+                grupos={filteredGroups}
+                selecionados={selectedGroupsForPaste}
+                onChange={setSelectedGroupsForPaste}
+                instanceName={selectedInstance}
+                altura="max-h-[300px]"
+              />
             </div>
             
             <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
@@ -1143,49 +1317,15 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               </Button>
             </div>
 
-            <div className="space-y-2 pt-4 border-t border-border/50">
-              <Label>Buscar Grupo</Label>
-              <Input placeholder="Filtrar por nome..." value={searchTermCreate} onChange={e => setSearchTermCreate(e.target.value)} />
-              
-              <div className="flex items-center justify-between pt-2">
-                <Label>Selecione os Grupos Destino</Label>
-                <Button type="button" variant="ghost" size="sm" onClick={() => {
-                  const currentIds = filteredGroupsForCreate.map(g => g.id);
-                  const allSelected = currentIds.length > 0 && currentIds.every(id => selectedGroupsForCreate.includes(id));
-                  if (allSelected) {
-                    setSelectedGroupsForCreate(selectedGroupsForCreate.filter(id => !currentIds.includes(id)))
-                  } else {
-                    const newSelection = new Set([...selectedGroupsForCreate, ...currentIds]);
-                    setSelectedGroupsForCreate(Array.from(newSelection))
-                  }
-                }}>
-                  {filteredGroupsForCreate.length > 0 && filteredGroupsForCreate.every(g => selectedGroupsForCreate.includes(g.id)) ? 'Desmarcar Listados' : 'Selecionar Listados'}
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto p-2 border border-border/50 rounded-md bg-muted/10">
-                {filteredGroupsForCreate.map(g => (
-                  <label key={g.id} className="flex items-start space-x-3 p-3 hover:bg-muted/50 rounded cursor-pointer border border-border/40">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-gray-300 text-primary focus:ring-primary mt-0.5"
-                      checked={selectedGroupsForCreate.includes(g.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedGroupsForCreate([...selectedGroupsForCreate, g.id])
-                        } else {
-                          setSelectedGroupsForCreate(selectedGroupsForCreate.filter(id => id !== g.id))
-                        }
-                      }}
-                    />
-                    <span className="text-sm font-medium whitespace-normal break-words leading-tight flex-1">{g.name}</span>
-                  </label>
-                ))}
-                {filteredGroupsForCreate.length === 0 && (
-                  <div className="col-span-full text-center text-xs text-muted-foreground p-4">
-                    Nenhum grupo encontrado nesta instância.
-                  </div>
-                )}
-              </div>
+            <div className="space-y-2 pt-2">
+              <Label>Grupos de destino</Label>
+              <SeletorDeGrupos
+                grupos={filteredGroups}
+                selecionados={selectedGroupsForCreate}
+                onChange={setSelectedGroupsForCreate}
+                instanceName={selectedInstance}
+                altura="max-h-[300px]"
+              />
             </div>
 
             <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
@@ -1329,4 +1469,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       </Dialog>
     </div>
   )
+}
+
+/** No modo de seleção o card não navega — só marca e desmarca. */
+function ConditionalLink({ href, desativado, children }: { href: string; desativado: boolean; children: React.ReactNode }) {
+  if (desativado) return <>{children}</>
+  return <Link href={href}>{children}</Link>
 }

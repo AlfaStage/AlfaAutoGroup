@@ -65,7 +65,8 @@ export function GlobalErrorAlerts() {
   return (
     <>
       {/* Toast flutuante */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+      {/* No celular sobe acima da barra de navegacao inferior, para nao cobri-la */}
+      <div className="fixed right-4 z-50 flex flex-col gap-2 bottom-[calc(5rem+env(safe-area-inset-bottom))] lg:bottom-4">
         <div className="bg-red-500 text-white p-4 rounded-lg shadow-lg flex items-center justify-between w-80">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 flex-shrink-0" />

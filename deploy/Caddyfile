@@ -1,0 +1,28 @@
+{
+	email admin@alfastage.com.br
+	servers {
+		timeouts {
+			read_body 5m
+		}
+	}
+}
+
+# Host desconhecido (scanners) nao chega nos backends
+:80, :443 {
+	respond 404
+}
+
+# Painel AlfaAltoGrup (Next.js)
+{$APP_DOMAIN} {
+	encode zstd gzip
+	request_body {
+		max_size 64MB
+	}
+	reverse_proxy web:3000
+}
+
+# Evolution GO (API do WhatsApp)
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy evolution-go:8080
+}

@@ -1,9 +1,124 @@
 const { PrismaClient } = require('@prisma/client');
+const { runGroupTask } = require('./shared/group-tasks');
+const ops = require('./shared/ops');
+const capacidade = require('./shared/capacity');
+const relatorio = require('./shared/report');
 const prisma = new PrismaClient();
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
 let isProcessing = false;
+
+/** Recorte do estado do grupo que vale a pena guardar no historico. */
+function snapshotTexto(st) {
+  if (!st) return null;
+  return {
+    name: st.name || '',
+    topic: st.topic || '',
+    isAnnounce: Boolean(st.isAnnounce),
+    isLocked: Boolean(st.isLocked),
+    isApprovalRequired: Boolean(st.isApprovalRequired),
+    adminOnlyAdd: Boolean(st.adminOnlyAdd)
+  };
+}
+
+/**
+ * A Evolution baixa a midia pela URL, entao ela precisa ser absoluta.
+ * O painel ja manda absoluta; quem usa a API ou o MCP recebe o caminho
+ * relativo de /api/upload, e e aqui que ele vira endereco completo.
+ */
+function urlAbsolutaDeMidia(valor) {
+  const v = String(valor || '');
+  if (!v || /^https?:\/\//i.test(v) || v.startsWith('data:')) return v;
+
+  const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+  if (!base) return v;
+  return v.startsWith('/') ? base + v : base + '/' + v;
+}
+
+// Espera crescente entre tentativas: 2min, 10min, 30min.
+const TASK_BACKOFF_MIN = [2, 10, 30];
+const TASK_MAX_ATTEMPTS = 3;
+
+/**
+ * Executa um agendamento de mudanca de grupo (permissao ou perfil).
+ * O runGroupTask le o estado atual antes de aplicar: se o grupo ja estiver
+ * como pedido, nada e enviado ao WhatsApp e o agendamento fecha como
+ * "skipped". Depois de aplicar, ele relê para confirmar que pegou.
+ */
+async function runGroupSchedule(schedule, content) {
+  const attempt = (schedule.attempts || 0) + 1;
+
+  let result;
+  try {
+    result = await runGroupTask({
+      group: schedule.group,
+      kind: schedule.type,
+      payload: content,
+      baseUrl: process.env.NEXT_PUBLIC_APP_URL || ''
+    });
+  } catch (e) {
+    result = { status: 'error', message: String((e && e.message) || e) };
+  }
+
+  // Falha transitoria: reagenda em vez de dar o agendamento por perdido.
+  if (result.status === 'error' && attempt < TASK_MAX_ATTEMPTS) {
+    const minutos = TASK_BACKOFF_MIN[attempt - 1] || 30;
+    await prisma.schedule.update({
+      where: { id: schedule.id },
+      data: {
+        status: 'pending',
+        attempts: attempt,
+        adjustedAt: new Date(Date.now() + minutos * 60 * 1000),
+        errorMessage: `tentativa ${attempt}: ${result.message}`
+      }
+    });
+    console.log(`[Worker] Agendamento ${schedule.id} falhou (${result.message}). Nova tentativa em ${minutos}min.`);
+    return;
+  }
+
+  await prisma.schedule.update({
+    where: { id: schedule.id },
+    data: {
+      status: result.status === 'done' ? 'sent' : result.status, // sent | skipped | error
+      attempts: attempt,
+      appliedInfo: JSON.stringify({
+        applied: result.applied || [],
+        alreadyOk: result.alreadyOk || [],
+        message: result.message || '',
+        // Antes/depois para o painel mostrar o que mudou de fato.
+        // A foto nao entra: so guardamos texto.
+        before: snapshotTexto(result.stateBefore),
+        after: snapshotTexto(result.groupData)
+      }),
+      skipReason: result.status === 'skipped' ? result.message : null,
+      errorMessage: result.status === 'error' ? result.message : null
+    }
+  });
+
+  // Espelha no banco local o estado que a Evolution confirmou.
+  if (result.groupData) {
+    try {
+      await prisma.group.update({
+        where: { id: schedule.groupId },
+        data: {
+          isAnnounce: Boolean(result.groupData.isAnnounce),
+          isLocked: Boolean(result.groupData.isLocked),
+          isApprovalRequired: Boolean(result.groupData.isApprovalRequired),
+          adminOnlyAdd: Boolean(result.groupData.adminOnlyAdd),
+          ...(result.groupData.name ? { name: result.groupData.name } : {}),
+          ...(typeof result.groupData.topic === 'string'
+            ? { topic: result.groupData.topic, description: result.groupData.topic }
+            : {})
+        }
+      });
+    } catch (e) {
+      console.error('[Worker] Falha ao espelhar estado do grupo', e);
+    }
+  }
+
+  console.log(`[Worker] Agendamento ${schedule.id} (${schedule.type}) -> ${result.status}: ${result.message}`);
+}
 
 async function processSchedules() {
   if (isProcessing) return;
@@ -70,16 +185,24 @@ async function processSchedules() {
         continue;
       }
 
+      const content = JSON.parse(schedule.content);
+
+      // Permissao e perfil nao sao mensagens: vao para o executor de grupo,
+      // que confere o estado atual antes de mexer em qualquer coisa.
+      if (schedule.type === 'permission' || schedule.type === 'profile') {
+        await runGroupSchedule(schedule, content);
+        continue;
+      }
+
       let endpoint = '';
       let payload = {};
-
-      const content = JSON.parse(schedule.content);
 
       if (schedule.type === 'text') {
         endpoint = `/send/text`;
         payload = {
           number: evolutionGroupId,
           text: content.text,
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       } else if (schedule.type === 'media') {
@@ -88,8 +211,9 @@ async function processSchedules() {
           number: evolutionGroupId,
           type: content.mediatype || 'image',
           caption: content.caption || '',
-          url: content.media,
+          url: urlAbsolutaDeMidia(content.media),
           filename: content.fileName || 'file.mp4',
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       } else if (schedule.type === 'button') {
@@ -113,6 +237,7 @@ async function processSchedules() {
 
         payload = {
           number: evolutionGroupId,
+          mentionAll: Boolean(content.mentionAll),
           title: content.title || 'Opção',
           description: content.description || 'Escolha uma opção',
           footer: content.footer || 'Rodapé',
@@ -123,9 +248,9 @@ async function processSchedules() {
         // Adicionar suporte a botões com imagem ou vídeo apenas se NÃO houver CTA
         if (!hasCTA) {
           if (content.imageUrl || (content.media && content.mediatype === 'image')) {
-            payload.imageUrl = content.imageUrl || content.media;
+            payload.imageUrl = urlAbsolutaDeMidia(content.imageUrl || content.media);
           } else if (content.videoUrl || (content.media && content.mediatype === 'video')) {
-            payload.videoUrl = content.videoUrl || content.media;
+            payload.videoUrl = urlAbsolutaDeMidia(content.videoUrl || content.media);
           }
         }
       } else if (schedule.type === 'poll') {
@@ -143,6 +268,7 @@ async function processSchedules() {
           question: content.name || 'Enquete',
           maxAnswer: parseInt(content.selectableCount, 10) || 1,
           options: pollOptions,
+          mentionAll: Boolean(content.mentionAll),
           delay: 1200
         };
       }
@@ -165,7 +291,8 @@ async function processSchedules() {
               where: { id: schedule.id },
               data: {
                 status: 'sent',
-                evolutionMessageId: data.key?.id || data.data?.key?.id || data.id || null
+                // A Evolution devolve {data:{Info:{ID}}}; as demais formas ficam de reserva
+                evolutionMessageId: ops.extrairIdMensagem(data)
               }
             });
             console.log(`[Worker] Enviado agendamento ${schedule.id} para grupo ${evolutionGroupId}`);
@@ -345,11 +472,131 @@ async function dailySync() {
   }
 }
 
+/**
+ * Avisa no grupo de gestao sobre agendamentos que acabaram em erro e ainda
+ * nao foram comunicados. Roda junto do laco normal, entao o aviso sai em
+ * ate 10 segundos depois da falha.
+ */
+async function avisarErrosPendentes() {
+  try {
+    const comErro = await prisma.schedule.findMany({
+      where: { status: 'error' },
+      include: { group: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 20
+    });
+
+    for (const s of comErro) {
+      await ops.alertarErroDeAgendamento(prisma, s, s.group);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao avisar falhas:', e);
+  }
+}
+
+/** Guarda a contagem de membros do dia, base do "quantas pessoas entraram". */
+async function registrarSnapshotDiario() {
+  try {
+    const hoje = ops.hojeSP();
+    const grupos = await prisma.group.findMany({
+      select: { id: true, participantCount: true }
+    });
+
+    for (const g of grupos) {
+      await prisma.groupDailySnapshot.upsert({
+        where: { groupId_date: { groupId: g.id, date: hoje } },
+        update: { memberCount: g.participantCount || 0 },
+        create: { groupId: g.id, date: hoje, memberCount: g.participantCount || 0 }
+      });
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao gravar snapshot diario:', e);
+  }
+}
+
+let ultimoRelatorio = null;
+
+/**
+ * Relatorio diario as 23:59 no fuso de Sao Paulo.
+ * O AlertLog garante que sai uma vez por dia mesmo se o worker reiniciar.
+ */
+async function relatorioDiario() {
+  try {
+    const ligado = await ops.lerAjuste(prisma, ops.CHAVE_RELATORIO_ON, 'true');
+    if (ligado !== 'true') return;
+
+    const { h, m } = ops.agoraSP();
+    if (h !== 23 || m < 59) return;
+
+    const hoje = ops.hojeSP();
+    if (ultimoRelatorio === hoje) return;
+
+    const jaEnviado = await prisma.alertLog.findUnique({
+      where: { kind_refId: { kind: 'daily_report', refId: hoje } }
+    }).catch(() => null);
+    if (jaEnviado) { ultimoRelatorio = hoje; return; }
+
+    const destino = await ops.grupoDeAlerta(prisma);
+    if (!destino) return;
+
+    // Garante que o snapshot do dia existe antes de calcular o crescimento
+    await registrarSnapshotDiario();
+
+    const rel = await relatorio.montarRelatorio(prisma, hoje);
+    const texto = relatorio.resumoTexto(rel);
+
+    const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+    const enviado = await ops.enviarParaGrupo(
+      destino,
+      texto,
+      base
+        ? { displayText: 'Ver relatório completo', url: `${base}/relatorios/${hoje}`, title: 'Relatório diário' }
+        : null
+    );
+
+    if (enviado.ok) {
+      ultimoRelatorio = hoje;
+      await prisma.alertLog.create({
+        data: { kind: 'daily_report', refId: hoje, detail: `${rel.totais.enviados} enviados` }
+      }).catch(() => {});
+      console.log(`[Worker] Relatorio diario de ${hoje} enviado.`);
+    } else {
+      console.error('[Worker] Falha ao enviar relatorio:', enviado.erro);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro no relatorio diario:', e);
+  }
+}
+
+/** Cria o proximo grupo das tags cujos grupos encheram. */
+async function manterVagas() {
+  try {
+    const eventos = await capacidade.manterVagasAbertas(prisma);
+    for (const e of eventos) {
+      if (e.ok) console.log(`[Worker] Tag ${e.tag}: grupo "${e.nome}" criado com ${e.copiados} agendamento(s).`);
+      else console.error(`[Worker] Tag ${e.tag}: ${e.erro}`);
+    }
+  } catch (e) {
+    console.error('[Worker] Erro ao manter vagas:', e);
+  }
+}
+
 // Run every 10 seconds
 setInterval(() => {
   processSchedules();
+  avisarErrosPendentes();
+  relatorioDiario();
   dailySync();
 }, 10000);
 console.log('[Worker] Iniciado com sucesso. Verificando agendamentos...');
 processSchedules();
+avisarErrosPendentes();
+registrarSnapshotDiario();
 dailySync();
+
+// Rotinas mais lentas: lotacao das tags e contagem diaria de membros.
+setInterval(() => {
+  manterVagas();
+  registrarSnapshotDiario();
+}, 5 * 60 * 1000);
+manterVagas();

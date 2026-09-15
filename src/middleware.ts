@@ -6,7 +6,9 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/uploads']
+  // '/l' e o encurtador: quem clica no WhatsApp nao tem sessao
+  // '/api/upload' e '/api/uploads' lidam com midia diretamente para nao clonar/truncar streams de arquivos no middleware edge (a rota valida autenticacao internamente)
+  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/upload', '/api/uploads', '/l/', '/g/']
   const isPublic = publicRoutes.some(route => pathname.startsWith(route))
   
   // Static assets and internal next routes
@@ -16,6 +18,7 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/manifest') ||
     pathname.startsWith('/icons') ||
     pathname.startsWith('/sw.js') ||
+    pathname.startsWith('/offline.html') ||
     pathname.endsWith('.png') ||
     pathname.endsWith('.ico')
   ) {
@@ -26,14 +29,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  const token = await getToken({ req: request })
-  
-  // Allow AI API Key bypass
-  const aiToken = request.headers.get('authorization')?.replace('Bearer ', '');
-  const expectedKey = process.env.AI_API_KEY || "gdngfbgsefgrdthfyjgumh76543gdbhr6j7yht";
-  if (aiToken && aiToken === expectedKey) {
+  // Chave de API: o middleware roda no edge e nao tem acesso ao banco, entao
+  // ele apenas deixa passar — quem valida a chave e a propria rota, via
+  // isAuthenticated(). Sem chave valida, a rota responde 401.
+  const temChaveApi = (request.headers.get('authorization') || '')
+    .toLowerCase()
+    .startsWith('bearer ')
+  if (temChaveApi && pathname.startsWith('/api/')) {
     return NextResponse.next()
   }
+
+  const token = await getToken({ req: request })
   
   if (!token) {
     // API routes return 401
