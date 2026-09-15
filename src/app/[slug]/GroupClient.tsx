@@ -126,7 +126,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
   const [pasteText, setPasteText] = useState('')
   const [pasteError, setPasteError] = useState('')
   const [messages, setMessages] = useState(initialGroup.messages || [])
-  const [activeTab, setActiveTab] = useState('details')
+  const [activeTab, setActiveTab] = useState('schedules')
   const [contacts, setContacts] = useState<any[]>([])
   
   // Filtros da Agenda

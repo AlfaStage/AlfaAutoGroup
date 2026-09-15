@@ -4,8 +4,9 @@ const nextConfig: NextConfig = {
   output: "standalone",
   experimental: {
     serverActions: {
-      bodySizeLimit: '50mb',
+      bodySizeLimit: '64mb',
     },
+    middlewareClientMaxBodySize: '64mb',
     cpus: 2,
   },
   typescript: {

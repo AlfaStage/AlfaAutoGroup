@@ -35,9 +35,32 @@ async function montarRelatorio(prisma, dataISO, opcoes = {}) {
   const { inicio, fim } = janelaDoDia(dataISO);
   const comEnquetes = opcoes.comEnquetes !== false;
 
+  let idsFiltroTag = null;
+  if (opcoes.tagId && opcoes.tagId !== 'todas') {
+    const relacoes = await prisma.groupTag.findMany({
+      where: { tagId: opcoes.tagId },
+      select: { groupId: true }
+    });
+    idsFiltroTag = new Set(relacoes.map(r => r.groupId));
+  }
+
   const agendamentos = await prisma.schedule.findMany({
-    where: { updatedAt: { gte: inicio, lte: fim } },
-    include: { group: { select: { id: true, name: true, slug: true, instanceName: true, participantCount: true } } },
+    where: {
+      updatedAt: { gte: inicio, lte: fim },
+      ...(idsFiltroTag ? { groupId: { in: Array.from(idsFiltroTag) } } : {})
+    },
+    include: {
+      group: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          instanceName: true,
+          participantCount: true,
+          tags: { include: { tag: true } }
+        }
+      }
+    },
     orderBy: { adjustedAt: 'asc' }
   });
 
@@ -181,13 +204,28 @@ async function montarRelatorio(prisma, dataISO, opcoes = {}) {
   const totalSaidas = crescimento.reduce((soma, c) => soma + Math.min(0, c.novos || 0), 0);
 
   // --------------------------------------------------------------- tags
-  const tags = await prisma.tag.findMany({ include: { groups: true } })
-  const resumoTags = tags.map(t => ({
-    nome: t.name,
-    cor: t.color,
-    grupos: t.groups.length,
-    autoCreate: t.autoCreate
-  }))
+  const tags = await prisma.tag.findMany({
+    include: {
+      groups: {
+        include: {
+          group: { select: { id: true, name: true, participantCount: true } }
+        }
+      }
+    }
+  })
+  const resumoTags = tags.map(t => {
+    const totalMembros = t.groups.reduce((acc, g) => acc + (g.group?.participantCount || 0), 0)
+    return {
+      id: t.id,
+      nome: t.name,
+      slug: t.slug,
+      cor: t.color,
+      capacidade: t.capacity,
+      grupos: t.groups.length,
+      totalMembros,
+      autoCreate: t.autoCreate
+    }
+  })
 
   return {
     data: dataISO,
@@ -261,6 +299,13 @@ function resumoTexto(rel) {
       } else {
         linhas.push('   (resultados indisponíveis)');
       }
+    });
+  }
+
+  if (rel.tags && rel.tags.length) {
+    linhas.push('', '*Tags e Lotação*');
+    rel.tags.slice(0, 5).forEach(t => {
+      linhas.push(`• ${t.nome}: ${t.grupos} grupo(s), ${t.totalMembros || 0} membros${t.autoCreate ? ' (auto-criação ativa)' : ''}`);
     });
   }
 

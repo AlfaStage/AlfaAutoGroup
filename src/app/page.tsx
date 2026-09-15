@@ -13,6 +13,11 @@ export default async function Dashboard() {
 
   const groups = await prisma.group.findMany({
     include: {
+      tags: {
+        include: {
+          tag: true
+        }
+      },
       schedules: {
         select: { status: true }
       },

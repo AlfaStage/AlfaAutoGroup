@@ -71,14 +71,22 @@ function baseUrlDe(request: Request) {
 
 function resposta(request: Request, nome: string, ext: string, bytes: number) {
   const caminho = `/api/uploads/${nome}`;
+  const publica = `${baseUrlDe(request)}${caminho}`;
+  const tipo = tipoDeMidia(ext);
+
   return NextResponse.json({
     success: true,
     filename: nome,
-    // `path` é o valor a usar em content.media ou content.picture
+    // `url` é a URL pública e permanente: é ela que a Evolution baixa.
+    // Vale para sempre e não exige chave nem sessão.
+    url: publica,
+    // `path` é o mesmo arquivo em caminho relativo, aceito nos mesmos campos
     path: caminho,
-    url: `${baseUrlDe(request)}${caminho}`,
-    mediatype: tipoDeMidia(ext),
-    bytes
+    mediatype: tipo,
+    bytes,
+    comoUsar: tipo === 'image'
+      ? `Use "${publica}" em content.media (mediatype "image") ou em content.picture.`
+      : `Use "${publica}" em content.media com mediatype "${tipo}".`
   });
 }
 

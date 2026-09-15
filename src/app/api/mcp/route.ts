@@ -13,6 +13,16 @@ import {
   PERMISSION_ACTIONS,
   SCHEDULE_TYPES
 } from '@/lib/schedule-types'
+import {
+  montarPrevia,
+  contentDaLinha,
+  validarPedido,
+  ESPACO_PADRAO_S,
+  ESPACO_MINIMO_S,
+  type PedidoEmMassa
+} from '@/lib/bulk-edit'
+import { montarRelatorio, resumoTexto } from '@shared/report'
+import { hojeSP } from '@shared/ops'
 
 const prisma = new PrismaClient()
 
@@ -128,7 +138,11 @@ async function salvarArquivo(args: { filename?: string; base64?: string; url?: s
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, nome), buffer)
 
-  return { path: `/api/uploads/${nome}`, mediatype: tipoDeMidia(ext), bytes: buffer.length }
+  const raiz = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
+  const caminho = `/api/uploads/${nome}`
+
+  // A URL publica e permanente e o que a Evolution baixa — sem chave, sem sessao.
+  return { path: caminho, url: raiz ? raiz + caminho : caminho, mediatype: tipoDeMidia(ext), bytes: buffer.length }
 }
 
 // --------------------------------------------------------------- ferramentas
@@ -298,8 +312,10 @@ const FERRAMENTAS: Ferramenta[] = [
       }
     },
     handler: async (args) => {
+      const id = args.agendamentoId || args.id || args.scheduleId
+      if (!id) return texto('Informe o agendamentoId.')
       const s = await prisma.schedule.findUnique({
-        where: { id: args.agendamentoId },
+        where: { id },
         include: { group: { select: { name: true } } }
       })
       if (!s) return texto('Agendamento não encontrado.')
@@ -382,10 +398,12 @@ const FERRAMENTAS: Ferramenta[] = [
       if (r.erro) return texto(`Não consegui salvar: ${r.erro}`)
       return texto({
         salvo: true,
+        url: r.url,
         path: r.path,
         mediatype: r.mediatype,
         bytes: r.bytes,
-        comoUsar: `Use "${r.path}" em content.media (com mediatype "${r.mediatype}") ou em content.picture.`
+        comoUsar: `Use "${r.url}" em content.media (com mediatype "${r.mediatype}") ou em content.picture. `
+          + 'A URL e publica e permanente: a Evolution baixa direto dela.'
       })
     }
   },
@@ -402,16 +420,18 @@ const FERRAMENTAS: Ferramenta[] = [
       properties: { agendamentoId: { type: 'string' } }
     },
     handler: async (args) => {
-      const s = await prisma.schedule.findUnique({ where: { id: args.agendamentoId } })
+      const id = args.agendamentoId || args.id || args.scheduleId
+      if (!id) return texto('Informe o agendamentoId.')
+      const s = await prisma.schedule.findUnique({ where: { id } })
       if (!s) return texto('Agendamento não encontrado.')
       if (s.status !== 'pending') {
         return texto(`Não dá para cancelar: o agendamento está como "${s.status}".`)
       }
       await prisma.schedule.update({
-        where: { id: args.agendamentoId },
+        where: { id },
         data: { status: 'deactivated' }
       })
-      return texto({ cancelado: true, id: args.agendamentoId })
+      return texto({ cancelado: true, id })
     }
   },
 
@@ -495,6 +515,376 @@ const FERRAMENTAS: Ferramenta[] = [
         aplicadas: r.applied || [],
         jaEstavam: r.alreadyOk || []
       })
+    }
+  },
+
+  {
+    name: 'edicao_em_massa',
+    description:
+      'Edita nome (usando template com {n}, {nn}, {total}, {nome}), descrição e/ou foto '
+      + 'de múltiplos grupos em lote com espaçamento. Suporta dryRun para conferir a prévia antes de aplicar.',
+    inputSchema: {
+      type: 'object',
+      required: ['groupIds'],
+      properties: {
+        groupIds: { type: 'array', items: { type: 'string' }, description: 'IDs dos grupos' },
+        nameTemplate: { type: 'string', description: 'Template de nome, ex.: "Turma {n} - {nome}"' },
+        description: { type: 'string', description: 'Nova descrição para os grupos' },
+        picture: { type: 'string', description: 'URL pública da nova foto de perfil' },
+        spacingSeconds: { type: 'number', description: 'Intervalo em segundos entre cada grupo (mínimo 15s)' },
+        dryRun: { type: 'boolean', description: 'Se true, devolve apenas a prévia do que mudaria' }
+      }
+    },
+    handler: async (args) => {
+      const ids = Array.isArray(args.groupIds) ? args.groupIds : []
+      if (ids.length === 0) return texto('Informe ao menos um groupId no array groupIds.')
+
+      const grupos = await prisma.group.findMany({
+        where: { id: { in: ids } },
+        select: { id: true, name: true, topic: true },
+        orderBy: { name: 'asc' }
+      })
+      if (grupos.length === 0) return texto('Nenhum dos grupos informados foi encontrado.')
+
+      const pedido: PedidoEmMassa = {
+        nameTemplate: args.nameTemplate,
+        description: args.description,
+        picture: args.picture,
+        spacingSeconds: args.spacingSeconds
+      }
+
+      const problema = validarPedido(pedido, grupos.length)
+      if (problema) return texto(`Pedido inválido: ${problema}`)
+
+      const previa = montarPrevia(grupos, pedido)
+      const efetivas = previa.filter(l => l.mudaNome || l.mudaDescricao || l.mudaFoto)
+
+      if (args.dryRun) {
+        return texto({
+          modo: 'dryRun (previa)',
+          totalSelecionados: grupos.length,
+          totalComMudanca: efetivas.length,
+          previa
+        })
+      }
+
+      if (efetivas.length === 0) {
+        return texto('Nenhum grupo mudaria com esse pedido.')
+      }
+
+      const lote = await prisma.bulkEdit.create({
+        data: {
+          payload: JSON.stringify(pedido),
+          snapshot: JSON.stringify(
+            grupos.map(g => ({ groupId: g.id, name: g.name, topic: g.topic || '' }))
+          ),
+          total: efetivas.length
+        }
+      })
+
+      for (const linha of efetivas) {
+        const quando = new Date(linha.quando)
+        await prisma.schedule.create({
+          data: {
+            groupId: linha.groupId,
+            type: 'profile',
+            content: JSON.stringify(contentDaLinha(linha, pedido)),
+            scheduledAt: quando,
+            adjustedAt: quando,
+            status: 'pending'
+          }
+        })
+      }
+
+      return texto({
+        loteCriado: true,
+        loteId: lote.id,
+        totalAgendados: efetivas.length,
+        primeiro: efetivas[0].quando,
+        ultimo: efetivas[efetivas.length - 1].quando,
+        comoDesfazer: `Use a ferramenta desfazer_edicao_em_massa com loteId "${lote.id}" para reverter.`
+      })
+    }
+  },
+
+  {
+    name: 'desfazer_edicao_em_massa',
+    description:
+      'Desfaz um lote de edição em massa criado anteriormente, reagendando os nomes e descrições anteriores.',
+    inputSchema: {
+      type: 'object',
+      required: ['loteId'],
+      properties: {
+        loteId: { type: 'string', description: 'ID do lote retornado por edicao_em_massa' }
+      }
+    },
+    handler: async (args) => {
+      const lote = await prisma.bulkEdit.findUnique({ where: { id: args.loteId } })
+      if (!lote) return texto('Lote não encontrado.')
+      if (lote.undoneAt) return texto('Este lote já foi desfeito anteriormente.')
+
+      const snapshot: { groupId: string; name: string; topic: string }[] = JSON.parse(lote.snapshot)
+      let pedido: any = {}
+      try { pedido = JSON.parse(lote.payload) } catch {}
+
+      const espaco = Math.max(ESPACO_MINIMO_S, Number(pedido?.spacingSeconds) || ESPACO_PADRAO_S)
+      const idsDoLote = snapshot.map(s => s.groupId)
+
+      const cancelados = await prisma.schedule.updateMany({
+        where: {
+          groupId: { in: idsDoLote },
+          type: 'profile',
+          status: 'pending',
+          createdAt: { gte: lote.createdAt }
+        },
+        data: { status: 'deactivated' }
+      })
+
+      const mudouNome = Boolean(pedido?.nameTemplate)
+      const mudouDescricao = typeof pedido?.description === 'string'
+      const inicio = Date.now() + 20_000
+      let criados = 0
+
+      for (const item of snapshot) {
+        const content: Record<string, string> = {}
+        if (mudouNome) content.name = item.name
+        if (mudouDescricao) content.description = item.topic || ''
+        if (Object.keys(content).length === 0) continue
+
+        const quando = new Date(inicio + criados * espaco * 1000)
+        await prisma.schedule.create({
+          data: {
+            groupId: item.groupId,
+            type: 'profile',
+            content: JSON.stringify(content),
+            scheduledAt: quando,
+            adjustedAt: quando,
+            status: 'pending'
+          }
+        })
+        criados++
+      }
+
+      await prisma.bulkEdit.update({
+        where: { id: lote.id },
+        data: { undoneAt: new Date() }
+      })
+
+      return texto({
+        desfeito: true,
+        loteId: lote.id,
+        reagendados: criados,
+        canceladosDoLote: cancelados.count,
+        observacao: 'Nomes e descrições originais reagendados. Fotos não são guardadas no snapshot.'
+      })
+    }
+  },
+
+  {
+    name: 'agendamento_em_massa',
+    description:
+      'Cria agendamentos simultâneos em múltiplos grupos (passando lista de groupIds ou tagSlug/tagId). '
+      + 'Suporta tanto um agendamento único (tipo, content, quando) quanto um array de múltiplos agendamentos (schedules).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupIds: { type: 'array', items: { type: 'string' }, description: 'IDs dos grupos' },
+        tagSlug: { type: 'string', description: 'Slug da tag (aplica a todos os grupos com esta tag)' },
+        tagId: { type: 'string', description: 'ID da tag (aplica a todos os grupos com esta tag)' },
+        tipo: { type: 'string', enum: [...SCHEDULE_TYPES], description: 'Tipo da ação se for agendamento único' },
+        content: { type: 'object', description: 'Conteúdo da ação se for agendamento único' },
+        quando: { type: 'string', description: 'Data/hora em ISO 8601 se for agendamento único' },
+        schedules: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['tipo', 'content', 'quando'],
+            properties: {
+              tipo: { type: 'string', enum: [...SCHEDULE_TYPES] },
+              content: { type: 'object' },
+              quando: { type: 'string' }
+            }
+          },
+          description: 'Lista de múltiplos agendamentos para criar em cada grupo'
+        }
+      }
+    },
+    handler: async (args) => {
+      let ids: string[] = Array.isArray(args.groupIds) ? [...args.groupIds] : []
+
+      if (args.tagSlug || args.tagId) {
+        const tag = await prisma.tag.findFirst({
+          where: args.tagId ? { id: args.tagId } : { slug: args.tagSlug },
+          include: { groups: true }
+        })
+        if (tag) {
+          const idsDaTag = tag.groups.map(g => g.groupId)
+          ids = Array.from(new Set([...ids, ...idsDaTag]))
+        }
+      }
+
+      if (ids.length === 0) {
+        return texto('Nenhum grupo informado. Forneça groupIds ou tagSlug/tagId.')
+      }
+
+      const listaTarefas: Array<{ tipo: string; content: any; quando: string }> = []
+      if (Array.isArray(args.schedules) && args.schedules.length > 0) {
+        for (const s of args.schedules) {
+          listaTarefas.push({ tipo: s.tipo, content: s.content, quando: s.quando })
+        }
+      } else if (args.tipo && args.content && args.quando) {
+        listaTarefas.push({ tipo: args.tipo, content: args.content, quando: args.quando })
+      } else {
+        return texto('Informe os dados do agendamento (tipo, content, quando) ou a lista schedules.')
+      }
+
+      for (const t of listaTarefas) {
+        const prob = validateScheduleContent(t.tipo, t.content)
+        if (prob) return texto(`Pedido inválido (${t.tipo}): ${prob}`)
+        const d = new Date(t.quando)
+        if (isNaN(d.getTime())) return texto(`Data inválida (${t.quando}). Use ISO 8601.`)
+      }
+
+      const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
+      let criadosTotal = 0
+
+      for (const t of listaTarefas) {
+        const acaoGrupo = isGroupActionType(t.tipo)
+        const reqTime = new Date(t.quando)
+
+        for (const gid of ids) {
+          let adjusted = new Date(reqTime)
+          if (!acaoGrupo) {
+            const oneMinBefore = new Date(adjusted.getTime() - 60000)
+            const oneMinAfter = new Date(adjusted.getTime() + 60000)
+            const conflitos = await prisma.schedule.findMany({
+              where: { status: 'pending', adjustedAt: { gte: oneMinBefore, lte: oneMinAfter } },
+              orderBy: { adjustedAt: 'desc' }
+            })
+            if (conflitos.length > 0) {
+              const delay = Math.floor(Math.random() * (60 - 15 + 1)) + 15
+              adjusted = new Date(conflitos[0].adjustedAt.getTime() + delay * 1000)
+            }
+          }
+
+          const rastreado = await aplicarRastreio(t.tipo, t.content, base, gid)
+          const sch = await prisma.schedule.create({
+            data: {
+              groupId: gid,
+              type: t.tipo,
+              content: JSON.stringify(rastreado.content),
+              scheduledAt: reqTime,
+              adjustedAt: adjusted,
+              status: 'pending'
+            }
+          })
+          if (rastreado.links.length) {
+            await prisma.trackedLink.updateMany({
+              where: { id: { in: rastreado.links.map((l: any) => l.id) } },
+              data: { scheduleId: sch.id }
+            })
+          }
+          criadosTotal++
+          if (!acaoGrupo && ids.length > 1) {
+            reqTime.setTime(adjusted.getTime())
+          }
+        }
+      }
+
+      return texto({
+        sucesso: true,
+        gruposAfetados: ids.length,
+        agendamentosPorGrupo: listaTarefas.length,
+        totalCriados: criadosTotal
+      })
+    }
+  },
+
+  {
+    name: 'relatorio_diario',
+    description:
+      'Consulta o relatório diário com métricas de mensagens enviadas, falhas, cliques em links, '
+      + 'crescimento de membros e dados detalhados de cada tag. Suporta filtrar por tag.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        data: { type: 'string', description: 'Data em YYYY-MM-DD no fuso de SP (padrão hoje)' },
+        tagId: { type: 'string', description: 'ID da tag para filtrar' },
+        resumoTexto: { type: 'boolean', description: 'Se true, inclui o resumo textual formatado para o WhatsApp' }
+      }
+    },
+    handler: async (args) => {
+      const dataIso = args.data || hojeSP()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataIso)) {
+        return texto('Formato de data inválido. Use YYYY-MM-DD.')
+      }
+
+      const rel = await montarRelatorio(prisma, dataIso, {
+        comEnquetes: false,
+        tagId: args.tagId
+      })
+
+      if (args.resumoTexto) {
+        return texto({
+          ...rel,
+          textoFormatadoWhatsApp: resumoTexto(rel)
+        })
+      }
+
+      return texto(rel)
+    }
+  },
+
+  {
+    name: 'listar_tags',
+    description:
+      'Lista as tags de grupos cadastradas, com quantidade de grupos, capacidade, membros e links de convite.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        busca: { type: 'string', description: 'Filtra pelo nome ou slug da tag' }
+      }
+    },
+    handler: async (args) => {
+      const tags = await prisma.tag.findMany({
+        where: args.busca
+          ? { OR: [{ name: { contains: args.busca } }, { slug: { contains: args.busca } }] }
+          : undefined,
+        include: {
+          groups: {
+            include: {
+              group: {
+                select: { id: true, name: true, participantCount: true, isFull: true }
+              }
+            },
+            orderBy: { position: 'asc' }
+          }
+        },
+        orderBy: { name: 'asc' }
+      })
+
+      return texto(tags.map(t => {
+        const totalMembros = t.groups.reduce((acc, g) => acc + (g.group?.participantCount || 0), 0)
+        return {
+          id: t.id,
+          nome: t.name,
+          slug: t.slug,
+          cor: t.color,
+          capacidade: t.capacity,
+          autoCreate: t.autoCreate,
+          padraoNome: t.namePattern,
+          linkConvite: t.inviteCode ? `/g/${t.inviteCode}` : null,
+          totalGrupos: t.groups.length,
+          totalMembros,
+          grupos: t.groups.map(g => ({
+            id: g.group?.id,
+            nome: g.group?.name,
+            membros: g.group?.participantCount,
+            lotado: g.group?.isFull,
+            posicao: g.position
+          }))
+        }
+      }))
     }
   }
 ]

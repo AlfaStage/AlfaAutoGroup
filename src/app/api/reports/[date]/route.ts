@@ -42,9 +42,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ date
 
   const { searchParams } = new URL(request.url)
   const comEnquetes = searchParams.get('enquetes') !== '0'
+  const tagId = searchParams.get('tagId') || undefined
 
   try {
-    const rel = await montarRelatorio(prisma, date, { comEnquetes })
+    const rel = await montarRelatorio(prisma, date, { comEnquetes, tagId })
 
     if (searchParams.get('resumo') === '1') {
       return NextResponse.json({ ...rel, resumo: resumoTexto(rel) })

@@ -46,9 +46,23 @@ import { aplicarRastreio } from '@/lib/tracked-links'
  *                 items:
  *                   type: string
  *                 description: Lista de IDs de múltiplos grupos (opcional se enviar groupId).
+ *               schedules:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     type:
+ *                       type: string
+ *                       enum: [text, media, button, poll, permission, profile]
+ *                     content:
+ *                       type: object
+ *                     scheduledAt:
+ *                       type: string
+ *                       format: date-time
+ *                 description: Lista de múltiplos agendamentos para disparar em cada grupo.
  *               type:
  *                 type: string
- *                 enum: [text, media, button, poll]
+ *                 enum: [text, media, button, poll, permission, profile]
  *               content:
  *                 type: object
  *                 description: "O conteúdo da mensagem em JSON. Exemplo para texto { text: 'Olá' }."
@@ -64,94 +78,121 @@ import { aplicarRastreio } from '@/lib/tracked-links'
 export async function POST(request: Request) {
   if (!(await isAuthenticated(request))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    const data = await request.json()
-    const { groupId, groupIds, type, content, scheduledAt } = data
+    const rawData = await request.json()
     
-    // Suportar tanto array (groupIds) quanto string (groupId) para compatibilidade
-    const groupsToSchedule = Array.isArray(groupIds) && groupIds.length > 0 
-      ? groupIds 
-      : (groupId ? [groupId] : [])
+    // Suportar tanto array de agendamentos, objeto com { groupIds, schedules }, ou objeto simples
+    const items: Array<{ groupIds: string[]; type: string; content: any; scheduledAt: string }> = []
 
-    if (groupsToSchedule.length === 0) {
-      return NextResponse.json({ error: 'É necessário informar groupId ou groupIds' }, { status: 400 })
+    if (Array.isArray(rawData)) {
+      for (const item of rawData) {
+        const gids = Array.isArray(item.groupIds) && item.groupIds.length > 0
+          ? item.groupIds
+          : (item.groupId ? [item.groupId] : [])
+        if (gids.length > 0 && item.type && item.content && item.scheduledAt) {
+          items.push({ groupIds: gids, type: item.type, content: item.content, scheduledAt: item.scheduledAt })
+        }
+      }
+    } else if (rawData && Array.isArray(rawData.schedules) && rawData.schedules.length > 0) {
+      const gids = Array.isArray(rawData.groupIds) && rawData.groupIds.length > 0
+        ? rawData.groupIds
+        : (rawData.groupId ? [rawData.groupId] : [])
+      for (const sch of rawData.schedules) {
+        const itemGids = Array.isArray(sch.groupIds) && sch.groupIds.length > 0
+          ? sch.groupIds
+          : (sch.groupId ? [sch.groupId] : gids)
+        if (itemGids.length > 0 && sch.type && sch.content && sch.scheduledAt) {
+          items.push({ groupIds: itemGids, type: sch.type, content: sch.content, scheduledAt: sch.scheduledAt })
+        }
+      }
+    } else if (rawData) {
+      const gids = Array.isArray(rawData.groupIds) && rawData.groupIds.length > 0
+        ? rawData.groupIds
+        : (rawData.groupId ? [rawData.groupId] : [])
+      items.push({ groupIds: gids, type: rawData.type, content: rawData.content, scheduledAt: rawData.scheduledAt })
     }
 
-    const problema = validateScheduleContent(type, content)
-    if (problema) {
-      return NextResponse.json({ error: problema }, { status: 400 })
+    if (items.length === 0) {
+      return NextResponse.json({ error: 'Nenhum agendamento válido informado' }, { status: 400 })
     }
 
-    const requestedTime = new Date(scheduledAt)
-    if (isNaN(requestedTime.getTime())) {
-      return NextResponse.json({ error: 'scheduledAt inválido' }, { status: 400 })
+    // Validar antes de gravar
+    for (const item of items) {
+      if (item.groupIds.length === 0) {
+        return NextResponse.json({ error: 'É necessário informar groupId ou groupIds' }, { status: 400 })
+      }
+      const problema = validateScheduleContent(item.type, item.content)
+      if (problema) {
+        return NextResponse.json({ error: problema }, { status: 400 })
+      }
+      const requestedTime = new Date(item.scheduledAt)
+      if (isNaN(requestedTime.getTime())) {
+        return NextResponse.json({ error: 'scheduledAt inválido' }, { status: 400 })
+      }
     }
 
-    // Mudancas de grupo (permissao/perfil) nao sofrem o jitter anti-ban:
-    // "abrir o grupo as 8h" precisa acontecer as 8h, nao 40s depois.
-    const acaoDeGrupo = isGroupActionType(type)
-
-    // Encurta e passa a contar os links marcados para rastreio. Acontece aqui
-    // para o codigo curto ja existir quando a mensagem for enviada.
     const host = request.headers.get('host')
     const proto = request.headers.get('x-forwarded-proto') || 'http'
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (host ? proto + '://' + host : '')
 
     const createdSchedules = []
 
-    for (const gid of groupsToSchedule) {
-      let adjustedAt = new Date(requestedTime)
-      const oneMinBefore = new Date(adjustedAt.getTime() - 60000)
-      const oneMinAfter = new Date(adjustedAt.getTime() + 60000)
+    for (const item of items) {
+      const acaoDeGrupo = isGroupActionType(item.type)
+      const requestedTime = new Date(item.scheduledAt)
 
-      const conflicts = acaoDeGrupo ? [] : await prisma.schedule.findMany({
-        where: {
-          status: 'pending',
-          adjustedAt: {
-            gte: oneMinBefore,
-            lte: oneMinAfter,
-          }
-        },
-        orderBy: { adjustedAt: 'desc' }
-      })
+      for (const gid of item.groupIds) {
+        let adjustedAt = new Date(requestedTime)
+        const oneMinBefore = new Date(adjustedAt.getTime() - 60000)
+        const oneMinAfter = new Date(adjustedAt.getTime() + 60000)
 
-      if (!acaoDeGrupo && conflicts.length > 0) {
-        const latestConflict = conflicts[0].adjustedAt
-        const randomDelay = Math.floor(Math.random() * (60 - 15 + 1)) + 15
-        adjustedAt = new Date(latestConflict.getTime() + (randomDelay * 1000))
-      }
-
-      // Cada grupo ganha os proprios codigos, para o clique dizer de onde veio.
-      const rastreado = await aplicarRastreio(type, content, baseUrl, gid)
-
-      const schedule = await prisma.schedule.create({
-        data: {
-          groupId: gid,
-          type,
-          content: JSON.stringify(rastreado.content),
-          scheduledAt: requestedTime,
-          adjustedAt,
-          status: 'pending'
-        }
-      })
-      // Amarra os links rastreados ao agendamento, para o painel mostrar os
-      // cliques daquele disparo sem precisar cruzar nada na mao.
-      if (rastreado.links.length) {
-        await prisma.trackedLink.updateMany({
-          where: { id: { in: rastreado.links.map((l: any) => l.id) } },
-          data: { scheduleId: schedule.id }
+        const conflicts = acaoDeGrupo ? [] : await prisma.schedule.findMany({
+          where: {
+            status: 'pending',
+            adjustedAt: {
+              gte: oneMinBefore,
+              lte: oneMinAfter,
+            }
+          },
+          orderBy: { adjustedAt: 'desc' }
         })
-      }
 
-      createdSchedules.push(schedule)
-      
-      // Update requestedTime slightly for the next iteration to simulate base shift
-      // Just so it stacks delays correctly for huge arrays
-      if (!acaoDeGrupo && groupsToSchedule.length > 1) {
-          requestedTime.setTime(adjustedAt.getTime());
+        if (!acaoDeGrupo && conflicts.length > 0) {
+          const latestConflict = conflicts[0].adjustedAt
+          const randomDelay = Math.floor(Math.random() * (60 - 15 + 1)) + 15
+          adjustedAt = new Date(latestConflict.getTime() + (randomDelay * 1000))
+        }
+
+        // Cada grupo ganha os proprios codigos, para o clique dizer de onde veio.
+        const rastreado = await aplicarRastreio(item.type, item.content, baseUrl, gid)
+
+        const schedule = await prisma.schedule.create({
+          data: {
+            groupId: gid,
+            type: item.type,
+            content: JSON.stringify(rastreado.content),
+            scheduledAt: requestedTime,
+            adjustedAt,
+            status: 'pending'
+          }
+        })
+
+        if (rastreado.links.length) {
+          await prisma.trackedLink.updateMany({
+            where: { id: { in: rastreado.links.map((l: any) => l.id) } },
+            data: { scheduleId: schedule.id }
+          })
+        }
+
+        createdSchedules.push(schedule)
+
+        if (!acaoDeGrupo && item.groupIds.length > 1) {
+          requestedTime.setTime(adjustedAt.getTime())
+        }
       }
     }
 
-    return NextResponse.json(createdSchedules.length === 1 ? createdSchedules[0] : createdSchedules)
+    const retornaUnico = createdSchedules.length === 1 && !Array.isArray(rawData) && !rawData?.schedules
+    return NextResponse.json(retornaUnico ? createdSchedules[0] : createdSchedules)
   } catch (error) {
     console.error("Erro ao criar agendamento(s):", error)
     return NextResponse.json({ error: 'Falha ao agendar' }, { status: 500 })

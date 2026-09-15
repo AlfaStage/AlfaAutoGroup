@@ -131,11 +131,13 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [isModalOpen, setIsModalOpen] = useState(false)
   // Busca na lista de grupos: com dezenas de grupos, rolar nao resolve.
   const [buscaGrupos, setBuscaGrupos] = useState('')
+  // Filtro por tag
+  const [tagFiltro, setTagFiltro] = useState<string>('todas')
   // Selecao para edicao em massa
   const [modoSelecao, setModoSelecao] = useState(false)
   const [selecionados, setSelecionados] = useState<string[]>([])
   const [bulkAberto, setBulkAberto] = useState(false)
-  // Tags usadas como atalho de seleção na barra de edição em massa
+  // Tags usadas como atalho de seleção na barra de edição em massa e no filtro
   const [tagsDoPainel, setTagsDoPainel] = useState<any[]>([])
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [qrCodeBase64, setQrCodeBase64] = useState<string>('')
@@ -558,11 +560,18 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     : []
 
   const termoBusca = buscaGrupos.trim().toLowerCase()
-  const filteredGroups = termoBusca
-    ? gruposDaInstancia.filter(g =>
-        g.name.toLowerCase().includes(termoBusca) ||
-        (g.description || '').toLowerCase().includes(termoBusca))
-    : gruposDaInstancia
+  const filteredGroups = gruposDaInstancia.filter(g => {
+    const matchesBusca = !termoBusca || (
+      g.name.toLowerCase().includes(termoBusca) ||
+      (g.description || '').toLowerCase().includes(termoBusca)
+    )
+    const matchesTag = tagFiltro === 'todas' || (
+      Array.isArray(g.tags) && g.tags.some((gt: any) =>
+        gt.tagId === tagFiltro || gt.tag?.id === tagFiltro || gt.tag?.slug === tagFiltro
+      )
+    )
+    return matchesBusca && matchesTag
+  })
 
   const filteredGroupsForPaste = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermPaste.toLowerCase()))
   const filteredGroupsForCreate = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermCreate.toLowerCase()))
@@ -682,7 +691,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </span>
           </div>
 
-          {/* Busca primeiro: e o que mais se usa quando ha dezenas de grupos */}
+          {/* Busca e filtro por tags: e o que mais se usa quando ha dezenas de grupos */}
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -693,6 +702,26 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                 className="pl-9"
               />
             </div>
+
+            {tagsDoPainel.length > 0 && (
+              <Select value={tagFiltro} onValueChange={setTagFiltro}>
+                <SelectTrigger className="w-full sm:w-[200px]">
+                  <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Todas as tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as tags</SelectItem>
+                  {tagsDoPainel.map(t => (
+                    <SelectItem key={t.id} value={t.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color || '#6366f1' }} />
+                        {t.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             <div className="flex items-center gap-2">
               {/* Ação primária: é o que se faz todo dia */}
@@ -832,6 +861,28 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   <div className="flex-1 overflow-hidden">
                     <CardTitle className="text-base truncate group-hover:text-primary transition-colors">{g.name}</CardTitle>
                     <CardDescription className="truncate text-xs">{g.description || 'Sem descrição'}</CardDescription>
+                    {Array.isArray(g.tags) && g.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {g.tags.map((gt: any) => {
+                          const tag = gt.tag || gt;
+                          if (!tag?.name) return null;
+                          return (
+                            <span
+                              key={tag.id || gt.tagId}
+                              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium border"
+                              style={{
+                                borderColor: tag.color ? `${tag.color}40` : '#6366f140',
+                                backgroundColor: tag.color ? `${tag.color}15` : '#6366f115',
+                                color: tag.color || '#6366f1'
+                              }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color || '#6366f1' }} />
+                              {tag.name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </CardHeader>
                 <CardContent>

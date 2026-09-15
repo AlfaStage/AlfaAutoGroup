@@ -64,6 +64,11 @@ export async function GET(request: Request) {
     const groups = await prisma.group.findMany({
       where: whereClause,
       include: {
+        tags: {
+          include: {
+            tag: true
+          }
+        },
         _count: {
           select: { members: true, schedules: true }
         },
