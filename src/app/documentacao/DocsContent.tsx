@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Copy, Check, Clock, MessageSquare, ShieldCheck, Image as ImageIcon, Plug, Bot, Megaphone, MousePointerClick, PencilRuler, Tag as TagIcon, Bell } from 'lucide-react'
+import { Copy, Check, Clock, MessageSquare, ShieldCheck, Image as ImageIcon, Plug, Bot, Megaphone, MousePointerClick, PencilRuler, Tag as TagIcon, Bell, Pencil } from 'lucide-react'
 
 function Bloco({ codigo }: { codigo: string }) {
   const [copiado, setCopiado] = useState(false)
@@ -97,6 +97,7 @@ const INDICE = [
   { id: 'profile', texto: 'Editar grupo' },
   { id: 'execucao', texto: 'Como é executado' },
   { id: 'status', texto: 'Status possíveis' },
+  { id: 'editar', texto: 'Editar e arquivos' },
   { id: 'mencao', texto: 'Marcar todos' },
   { id: 'cliques', texto: 'Cliques em links' },
   { id: 'massa', texto: 'Edição em massa' },
@@ -450,6 +451,99 @@ export default function DocsContent() {
         </Secao>
 
         <Secao
+          id="editar"
+          icone={<Pencil className="w-5 h-5" />}
+          titulo="Editar agendamentos e enviar arquivos"
+          descricao="Pela API e pelo MCP, não só pelo painel."
+        >
+          <p className="font-medium">Editar em vez de desativar</p>
+          <p>
+            Um agendamento que ainda não saiu pode ser editado por inteiro —
+            conteúdo, horário, tipo e status. É o caminho preferido: desativar e
+            criar outro perde o histórico e polui a lista.
+          </p>
+
+          <Bloco codigo={`curl -X PATCH https://seu-dominio/api/schedules/ID \
+  -H "Authorization: Bearer aag_sua_chave_aqui" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": { "text": "texto corrigido" },
+    "scheduledAt": "2026-12-25T10:00:00.000Z"
+  }'`} />
+
+          <Tabela
+            cabecalho={['Campo', 'O que faz']}
+            linhas={[
+              ['content', 'Novo conteúdo. Passa pela mesma validação da criação'],
+              ['scheduledAt', 'Novo horário. Ações de grupo não sofrem o ajuste anti-ban'],
+              ['type', 'Muda o tipo do agendamento'],
+              ['status', '"pending" reativa (e limpa o erro); "deactivated" desliga sem apagar']
+            ]}
+          />
+
+          <p className="text-muted-foreground">
+            Reativar com <code className="text-xs">status: &quot;pending&quot;</code> zera o
+            erro e o contador de tentativas — é assim que se destrava a fila de um
+            grupo parado. Agendamento já enviado não é editável.
+          </p>
+          <p className="text-muted-foreground">
+            No MCP a ferramenta é <code className="text-xs">editar_agendamento</code>,
+            com os mesmos campos.
+          </p>
+
+          <p className="font-medium pt-2">Enviar imagem, vídeo, áudio ou documento</p>
+          <p>
+            <code className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">POST /api/upload</code> aceita
+            três formatos, para servir o navegador, a API e o MCP:
+          </p>
+          <Tabela
+            cabecalho={['Forma', 'Quando usar']}
+            linhas={[
+              ['multipart/form-data (campo file)', 'O painel, direto do navegador'],
+              ['JSON { filename, base64 }', 'API e MCP — aceita data URI ou base64 puro'],
+              ['JSON { url }', 'O servidor baixa de um endereço público e guarda']
+            ]}
+          />
+
+          <Bloco codigo={`curl -X POST https://seu-dominio/api/upload \
+  -H "Authorization: Bearer aag_sua_chave_aqui" \
+  -H "Content-Type: application/json" \
+  -d '{ "filename": "promo.mp4", "url": "https://exemplo.com/promo.mp4" }'`} />
+
+          <p>A resposta traz tudo que o agendamento precisa:</p>
+          <Bloco codigo={`{
+  "success": true,
+  "path": "/api/uploads/1789-ab12-promo.mp4",
+  "url": "https://seu-dominio/api/uploads/1789-ab12-promo.mp4",
+  "mediatype": "video",
+  "bytes": 4823910
+}`} />
+
+          <p className="text-muted-foreground">
+            Use <code className="text-xs">path</code> em{' '}
+            <code className="text-xs">content.media</code> (com o{' '}
+            <code className="text-xs">mediatype</code> devolvido) ou em{' '}
+            <code className="text-xs">content.picture</code>. O caminho relativo é
+            resolvido para endereço completo na hora do envio.
+          </p>
+
+          <Tabela
+            cabecalho={['Tipo', 'Extensões aceitas']}
+            linhas={[
+              ['image', '.jpg .jpeg .png .webp .gif'],
+              ['video', '.mp4 .3gp .mov .mkv .webm'],
+              ['audio', '.mp3 .ogg .opus .m4a .aac .wav'],
+              ['document', '.pdf .doc .docx .xls .xlsx .ppt .pptx .txt .csv .zip']
+            ]}
+          />
+
+          <p className="text-muted-foreground">
+            Limite de 64 MB. No MCP a ferramenta é{' '}
+            <code className="text-xs">enviar_arquivo</code>, com os mesmos campos.
+          </p>
+        </Secao>
+
+        <Secao
           id="mencao"
           icone={<Megaphone className="w-5 h-5" />}
           titulo="Marcar todos"
@@ -788,7 +882,8 @@ export default function DocsContent() {
               ['POST /api/tags/{id}/groups', 'Define os grupos da tag, na ordem da fila'],
               ['GET /api/reports/{data}', 'Relatório de um dia (YYYY-MM-DD)'],
               ['GET /api/settings', 'Grupo de alertas e interruptores'],
-              ['POST /api/upload', 'Envia um arquivo e devolve o caminho para usar em media ou picture']
+              ['PATCH /api/schedules/{id}', 'Edita conteúdo, horário, tipo ou status de um agendamento'],
+              ['POST /api/upload', 'Envia arquivo por multipart, base64 ou URL; devolve path e mediatype']
             ]}
           />
 
@@ -856,6 +951,8 @@ export default function DocsContent() {
               ['estado_do_grupo', 'Nome, descrição e as quatro permissões de um grupo'],
               ['listar_agendamentos', 'Agendamentos de um grupo, com status'],
               ['agendar_acao', 'Cria um agendamento de qualquer tipo'],
+              ['editar_agendamento', 'Edita conteúdo, horário, tipo ou status — prefira a cancelar'],
+              ['enviar_arquivo', 'Sobe imagem, vídeo, áudio ou documento por base64 ou URL'],
               ['cancelar_agendamento', 'Desativa um agendamento pendente'],
               ['trocar_permissao', 'Muda permissões agora'],
               ['editar_grupo', 'Muda nome, descrição e/ou foto agora']

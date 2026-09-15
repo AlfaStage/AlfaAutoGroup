@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server'
 import { PrismaClient } from '@prisma/client'
 import { validarChaveApi, chaveDoHeader } from '@/lib/api-keys'
 import { runGroupTask } from '@shared/group-tasks'
+import { aplicarRastreio } from '@/lib/tracked-links'
+import { writeFile, mkdir } from 'fs/promises'
+import { join, extname } from 'path'
+import { randomBytes } from 'crypto'
 import { persistGroupState } from '@/lib/group-state'
 import {
   validateScheduleContent,
@@ -59,6 +63,72 @@ function texto(valor: any) {
       text: typeof valor === 'string' ? valor : JSON.stringify(valor, null, 2)
     }]
   }
+}
+
+
+// --------------------------------------------------------------- arquivos
+
+const EXT_POR_TIPO: Record<string, string[]> = {
+  image: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
+  video: ['.mp4', '.3gp', '.mov', '.mkv', '.webm'],
+  audio: ['.mp3', '.ogg', '.opus', '.m4a', '.aac', '.wav'],
+  document: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.csv', '.zip']
+}
+const EXTENSOES_OK = new Set<string>(Object.values(EXT_POR_TIPO).flat())
+const LIMITE_BYTES = 64 * 1024 * 1024
+
+function tipoDeMidia(ext: string) {
+  for (const [tipo, lista] of Object.entries(EXT_POR_TIPO)) {
+    if (lista.includes(ext)) return tipo
+  }
+  return 'document'
+}
+
+/** Mesma logica de /api/upload, para o MCP nao depender de uma chamada HTTP. */
+async function salvarArquivo(args: { filename?: string; base64?: string; url?: string }) {
+  let buffer: Buffer | null = null
+  let nomeOrigem = args.filename || ''
+
+  if (args.base64) {
+    const ehDataUri = args.base64.startsWith('data:') && args.base64.includes(',')
+    const cru = ehDataUri ? args.base64.slice(args.base64.indexOf(',') + 1) : args.base64
+    buffer = Buffer.from(cru, 'base64')
+  } else if (args.url) {
+    try {
+      const r = await fetch(args.url, { redirect: 'follow' })
+      if (!r.ok) return { erro: `a URL respondeu ${r.status}` }
+      buffer = Buffer.from(await r.arrayBuffer())
+      if (!nomeOrigem) {
+        try { nomeOrigem = new URL(args.url).pathname } catch { /* url estranha */ }
+      }
+    } catch {
+      return { erro: 'nao consegui baixar a URL' }
+    }
+  } else {
+    return { erro: 'informe base64 (com filename) ou url' }
+  }
+
+  if (!buffer || buffer.length === 0) return { erro: 'arquivo vazio' }
+  if (buffer.length > LIMITE_BYTES) return { erro: 'arquivo maior que 64 MB' }
+
+  const limpo = String(nomeOrigem || 'arquivo')
+    .split(/[\\/]/).pop()!
+    .replace(/[^a-zA-Z0-9.\-_]/g, '_')
+    .slice(-80)
+
+  const ext = extname(limpo).toLowerCase()
+  if (!EXTENSOES_OK.has(ext)) {
+    return { erro: `extensao nao aceita: "${ext || 'nenhuma'}" — informe filename com a extensao certa` }
+  }
+
+  const base = (limpo.replace(/\.[^.]*$/, '') || 'arquivo').slice(0, 60)
+  const nome = `${Date.now()}-${randomBytes(3).toString('hex')}-${base}${ext}`
+
+  const dir = join(process.cwd(), 'uploads')
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, nome), buffer)
+
+  return { path: `/api/uploads/${nome}`, mediatype: tipoDeMidia(ext), bytes: buffer.length }
 }
 
 // --------------------------------------------------------------- ferramentas
@@ -206,8 +276,126 @@ const FERRAMENTAS: Ferramenta[] = [
   },
 
   {
+    name: 'editar_agendamento',
+    description:
+      'Edita um agendamento que ainda nao foi executado: conteudo, horario, '
+      + 'tipo ou status. Prefira editar a cancelar — o historico do disparo '
+      + 'e mantido. Passe status "pending" para reativar um agendamento '
+      + 'desativado ou com erro.',
+    inputSchema: {
+      type: 'object',
+      required: ['agendamentoId'],
+      properties: {
+        agendamentoId: { type: 'string' },
+        tipo: { type: 'string', enum: [...SCHEDULE_TYPES], description: 'Só se quiser mudar o tipo' },
+        content: { type: 'object', description: 'Novo conteúdo, no mesmo formato da criação' },
+        quando: { type: 'string', description: 'Nova data e hora em ISO 8601' },
+        status: {
+          type: 'string',
+          enum: ['pending', 'deactivated'],
+          description: 'pending reativa; deactivated desliga sem apagar'
+        }
+      }
+    },
+    handler: async (args) => {
+      const s = await prisma.schedule.findUnique({
+        where: { id: args.agendamentoId },
+        include: { group: { select: { name: true } } }
+      })
+      if (!s) return texto('Agendamento não encontrado.')
+
+      if (s.status === 'sent') {
+        return texto('Este agendamento já foi enviado — não dá para editar o que já saiu.')
+      }
+
+      const tipoFinal = args.tipo || s.type
+      const dados: any = {}
+
+      if (args.content !== undefined) {
+        const problema = validateScheduleContent(tipoFinal, args.content)
+        if (problema) return texto(`Pedido inválido: ${problema}`)
+
+        const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
+        const rastreado = await aplicarRastreio(tipoFinal, args.content, base, s.groupId)
+        dados.content = JSON.stringify(rastreado.content)
+
+        if (rastreado.links.length) {
+          await prisma.trackedLink.updateMany({
+            where: { id: { in: rastreado.links.map((l: any) => l.id) } },
+            data: { scheduleId: s.id }
+          })
+        }
+      }
+
+      if (args.tipo) dados.type = args.tipo
+
+      if (args.status) {
+        dados.status = args.status
+        if (args.status === 'pending') {
+          dados.errorMessage = null
+          dados.attempts = 0
+        }
+      }
+
+      if (args.quando) {
+        const q = new Date(args.quando)
+        if (isNaN(q.getTime())) return texto('Data inválida. Use ISO 8601.')
+        dados.scheduledAt = q
+        // Ações de grupo executam no horário exato; mensagens podem ser
+        // ajustadas pelo anti-ban na hora de rodar.
+        dados.adjustedAt = q
+      }
+
+      if (Object.keys(dados).length === 0) {
+        return texto('Informe ao menos um campo para alterar: content, quando, tipo ou status.')
+      }
+
+      const atualizado = await prisma.schedule.update({ where: { id: s.id }, data: dados })
+
+      return texto({
+        editado: true,
+        id: atualizado.id,
+        grupo: s.group?.name,
+        tipo: atualizado.type,
+        executaEm: atualizado.adjustedAt,
+        status: atualizado.status
+      })
+    }
+  },
+
+  {
+    name: 'enviar_arquivo',
+    description:
+      'Sobe uma imagem, video, audio ou documento para o painel e devolve o '
+      + 'caminho a usar em content.media (mensagem de midia) ou '
+      + 'content.picture (foto de grupo). Aceita base64 ou uma URL publica.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        filename: { type: 'string', description: 'Nome com extensão, ex.: promo.mp4' },
+        base64: { type: 'string', description: 'Conteúdo em base64 (aceita data URI)' },
+        url: { type: 'string', description: 'URL pública para o servidor baixar' }
+      }
+    },
+    handler: async (args) => {
+      const r = await salvarArquivo(args)
+      if (r.erro) return texto(`Não consegui salvar: ${r.erro}`)
+      return texto({
+        salvo: true,
+        path: r.path,
+        mediatype: r.mediatype,
+        bytes: r.bytes,
+        comoUsar: `Use "${r.path}" em content.media (com mediatype "${r.mediatype}") ou em content.picture.`
+      })
+    }
+  },
+
+  {
     name: 'cancelar_agendamento',
-    description: 'Desativa um agendamento que ainda não foi executado.',
+    description:
+      'Desativa um agendamento que ainda nao foi executado. Prefira '
+      + 'editar_agendamento quando a intencao for corrigir algo — desativar '
+      + 'so faz sentido para cancelar de vez.',
     inputSchema: {
       type: 'object',
       required: ['agendamentoId'],

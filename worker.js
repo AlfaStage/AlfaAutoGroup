@@ -22,6 +22,20 @@ function snapshotTexto(st) {
   };
 }
 
+/**
+ * A Evolution baixa a midia pela URL, entao ela precisa ser absoluta.
+ * O painel ja manda absoluta; quem usa a API ou o MCP recebe o caminho
+ * relativo de /api/upload, e e aqui que ele vira endereco completo.
+ */
+function urlAbsolutaDeMidia(valor) {
+  const v = String(valor || '');
+  if (!v || /^https?:\/\//i.test(v) || v.startsWith('data:')) return v;
+
+  const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '');
+  if (!base) return v;
+  return v.startsWith('/') ? base + v : base + '/' + v;
+}
+
 // Espera crescente entre tentativas: 2min, 10min, 30min.
 const TASK_BACKOFF_MIN = [2, 10, 30];
 const TASK_MAX_ATTEMPTS = 3;
@@ -197,7 +211,7 @@ async function processSchedules() {
           number: evolutionGroupId,
           type: content.mediatype || 'image',
           caption: content.caption || '',
-          url: content.media,
+          url: urlAbsolutaDeMidia(content.media),
           filename: content.fileName || 'file.mp4',
           mentionAll: Boolean(content.mentionAll),
           delay: 1200
@@ -234,9 +248,9 @@ async function processSchedules() {
         // Adicionar suporte a botões com imagem ou vídeo apenas se NÃO houver CTA
         if (!hasCTA) {
           if (content.imageUrl || (content.media && content.mediatype === 'image')) {
-            payload.imageUrl = content.imageUrl || content.media;
+            payload.imageUrl = urlAbsolutaDeMidia(content.imageUrl || content.media);
           } else if (content.videoUrl || (content.media && content.mediatype === 'video')) {
-            payload.videoUrl = content.videoUrl || content.media;
+            payload.videoUrl = urlAbsolutaDeMidia(content.videoUrl || content.media);
           }
         }
       } else if (schedule.type === 'poll') {

@@ -130,7 +130,9 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
   const [contacts, setContacts] = useState<any[]>([])
   
   // Filtros da Agenda
-  const [hideDeactivated, setHideDeactivated] = useState(false)
+  // Desativados ficam escondidos por padrao — poluem a lista e raramente
+  // sao o que se procura. O contador avisa que eles existem.
+  const [hideDeactivated, setHideDeactivated] = useState(true)
   const [dateFilter, setDateFilter] = useState('all') // all, next24, next48, next7, next30, last24, last7, custom
   const [customDateStart, setCustomDateStart] = useState('')
   const [customDateEnd, setCustomDateEnd] = useState('')
@@ -232,6 +234,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     && newSchedule.buttonsList.some((b: any) => (b.type || 'reply') === 'reply')
 
   // O worker congela a fila de um grupo enquanto houver agendamento com erro.
+  const totalDesativados = schedules.filter((s: any) => s.status === 'deactivated').length
   const temErro = schedules.some((s: any) => s.status === 'error')
   const pendentesTravados = temErro
     ? schedules.filter((s: any) => s.status === 'pending').length
@@ -704,15 +707,20 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                 </div>
                 
                 <div className="flex items-center gap-2 w-full md:w-auto">
-                  <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-gray-300 text-primary focus:ring-primary"
-                      checked={hideDeactivated}
-                      onChange={e => setHideDeactivated(e.target.checked)}
-                    />
-                    Ocultar Desativados
-                  </label>
+                  {totalDesativados > 0 ? (
+                    <Button
+                      variant={hideDeactivated ? 'outline' : 'secondary'}
+                      size="sm"
+                      onClick={() => setHideDeactivated(!hideDeactivated)}
+                      className="w-full md:w-auto"
+                    >
+                      {hideDeactivated
+                        ? <><Eye className="w-4 h-4 mr-2" /> Mostrar {totalDesativados} desativado(s)</>
+                        : <><EyeOff className="w-4 h-4 mr-2" /> Ocultar desativados</>}
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Nenhum agendamento desativado</span>
+                  )}
                 </div>
               </div>
             </Card>
@@ -848,10 +856,11 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                         </Button>
                         {(s.status === 'pending' || isError) && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => openEditModal(s)} title="Editar agendamento">
-                              <Edit className="w-4 h-4" />
+                            <Button variant="default" size="sm" onClick={() => openEditModal(s)} title="Editar agendamento">
+                              <Edit className="w-4 h-4 sm:mr-2" />
+                              <span className="hidden sm:inline">Editar</span>
                             </Button>
-                            <Button variant="destructive" size="sm" onClick={() => handleDeactivate(s.id)} title="Ignorar erro e Desativar">
+                            <Button variant="ghost" size="sm" onClick={() => handleDeactivate(s.id)} title="Desativar — prefira editar quando for só corrigir">
                               <PowerOff className="w-4 h-4" />
                             </Button>
                           </>
