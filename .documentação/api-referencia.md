@@ -21,14 +21,21 @@ Documentação Swagger interativa disponível em `/api-docs`.
 - `POST /api/schedules`: Cria agendamentos. Suporta:
   - Disparo único em grupo único (`groupId`).
   - Disparo único em múltiplos grupos (`groupIds`).
-  - Disparo em massa de múltiplos agendamentos em múltiplos grupos (`groupIds` + `schedules: [...]`).
-- `PUT /api/schedules/[id]`: Edita conteúdo, data/hora ou status de um agendamento.
+  - Disparo segmentado por tag (`tagId`, `tagSlug` ou `tag`).
+  - Disparo em massa de múltiplos agendamentos em múltiplos grupos (`groupIds`/tags + `schedules: [...]`).
+- `PUT /api/schedules/[id]` ou `PATCH /api/schedules/[id]`: Edita conteúdo, data/hora ou status de um agendamento.
 - `DELETE /api/schedules/[id]`: Remove ou cancela um agendamento.
 
 ### Edição em Massa
-- `POST /api/bulk/profile`: Aplica ou simula (`dryRun: true`) edição em lote de perfil em múltiplos grupos.
+- `POST /api/bulk/profile`: Aplica ou simula (`dryRun: true`) edição em lote de perfil em múltiplos grupos (via `groupIds` ou `tagId`/`tagSlug`).
 - `GET /api/bulk/profile`: Lista lotes de edição em massa criados.
 - `POST /api/bulk/profile/[id]/undo`: Desfaz o lote restaurando o snapshot anterior.
+
+### Documentação & Especificações
+- `GET /api/documentacao`: Documentação técnica completa da API em Markdown e JSON (`?format=json`).
+- `GET /llm.txt` (e `/llms.txt`): Especificação estruturada do sistema para consumo por LLMs e agentes.
+- `GET /documentacao`: Manual e guia interativo acessível publicamente sem autenticação.
+- `GET /api-docs`: Swagger UI para exploração interativa.
 
 ### Relatórios
 - `GET /api/reports/[date]`: Relatório do dia (YYYY-MM-DD). Suporta `?resumo=1` para texto formatado e `?tagId={id}` para filtrar por tag.

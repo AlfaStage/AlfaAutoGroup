@@ -565,11 +565,13 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       g.name.toLowerCase().includes(termoBusca) ||
       (g.description || '').toLowerCase().includes(termoBusca)
     )
-    const matchesTag = tagFiltro === 'todas' || (
-      Array.isArray(g.tags) && g.tags.some((gt: any) =>
-        gt.tagId === tagFiltro || gt.tag?.id === tagFiltro || gt.tag?.slug === tagFiltro
-      )
-    )
+    const matchesTag = tagFiltro === 'todas'
+      ? true
+      : tagFiltro === 'sem_tag'
+        ? (!g.tags || g.tags.length === 0)
+        : (Array.isArray(g.tags) && g.tags.some((gt: any) =>
+            gt.tagId === tagFiltro || gt.tag?.id === tagFiltro || gt.tag?.slug === tagFiltro
+          ))
     return matchesBusca && matchesTag
   })
 
@@ -711,6 +713,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todas">Todas as tags</SelectItem>
+                  <SelectItem value="sem_tag">Sem tag</SelectItem>
                   {tagsDoPainel.map(t => (
                     <SelectItem key={t.id} value={t.id}>
                       <span className="flex items-center gap-2">
@@ -1467,6 +1470,18 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Edit Modal */}
+      <BulkEditModal
+        open={bulkAberto}
+        onOpenChange={setBulkAberto}
+        groupIds={selecionados}
+        onDone={() => {
+          setModoSelecao(false)
+          setSelecionados([])
+          window.location.reload()
+        }}
+      />
     </div>
   )
 }

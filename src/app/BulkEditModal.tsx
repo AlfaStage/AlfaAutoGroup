@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle
 } from '@/components/ui/dialog'
-import { Upload, Loader2, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Upload, Loader2, ArrowRight, AlertCircle, CheckCircle2, Tag as TagIcon } from 'lucide-react'
 
 type Props = {
   open: boolean
@@ -34,6 +34,8 @@ function paraInputLocal(d: Date) {
 }
 
 export default function BulkEditModal({ open, onOpenChange, groupIds, onDone }: Props) {
+  const [idsAtivos, setIdsAtivos] = useState<string[]>(groupIds)
+  const [tags, setTags] = useState<any[]>([])
   const [nameTemplate, setNameTemplate] = useState('')
   const [usarDescricao, setUsarDescricao] = useState(false)
   const [description, setDescription] = useState('')
@@ -52,14 +54,33 @@ export default function BulkEditModal({ open, onOpenChange, groupIds, onDone }: 
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    setIdsAtivos(groupIds)
+  }, [groupIds])
+
+  useEffect(() => {
     if (!open) return
     setPrevia(null)
     setErro('')
     setSucesso('')
+    fetch('/api/tags')
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setTags(Array.isArray(d) ? d : []))
+      .catch(() => {})
   }, [open])
 
+  const alternarTag = (tagGrupos: { id: string }[]) => {
+    const idsDaTag = tagGrupos.map(g => g.id)
+    const todosJa = idsDaTag.every(id => idsAtivos.includes(id))
+    setIdsAtivos(
+      todosJa
+        ? idsAtivos.filter(id => !idsDaTag.includes(id))
+        : Array.from(new Set([...idsAtivos, ...idsDaTag]))
+    )
+    setPrevia(null)
+  }
+
   const corpo = () => ({
-    groupIds,
+    groupIds: idsAtivos,
     nameTemplate: nameTemplate.trim() || undefined,
     description: usarDescricao ? description : undefined,
     picture: picture.trim() || undefined,
@@ -138,12 +159,46 @@ export default function BulkEditModal({ open, onOpenChange, groupIds, onDone }: 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[720px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Editar {groupIds.length} grupo(s) em massa</DialogTitle>
+          <DialogTitle>Editar {idsAtivos.length} grupo(s) em massa</DialogTitle>
           <DialogDescription>
             As alterações são agendadas uma a uma, espaçadas no tempo. Deixe em
             branco o que não quer mudar.
           </DialogDescription>
         </DialogHeader>
+
+        {tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-lg border border-border/50 bg-muted/20 my-2">
+            <span className="text-xs text-muted-foreground flex items-center gap-1 mr-1 font-medium">
+              <TagIcon className="w-3.5 h-3.5" /> Filtrar por tag:
+            </span>
+            {tags.map(t => {
+              const idsDaTag = (t.grupos || []).map((g: any) => g.id)
+              if (idsDaTag.length === 0) return null
+              const todosJa = idsDaTag.every((id: string) => idsAtivos.includes(id))
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => alternarTag(t.grupos)}
+                  className={`text-xs px-2 py-1 rounded-md border flex items-center gap-1.5 transition-colors ${
+                    todosJa
+                      ? 'border-transparent text-white font-medium shadow-sm'
+                      : 'border-border/60 bg-card hover:bg-muted/50 text-foreground'
+                  }`}
+                  style={todosJa ? { backgroundColor: t.color || '#6366f1' } : undefined}
+                  title={todosJa ? `Remover os ${idsDaTag.length} grupos da tag ${t.name}` : `Adicionar os ${idsDaTag.length} grupos da tag ${t.name}`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: todosJa ? 'rgba(255,255,255,.9)' : (t.color || '#6366f1') }}
+                  />
+                  {t.name}
+                  <span className="opacity-75 text-[10px]">({idsDaTag.length})</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         <div className="space-y-5 py-2">
           <div className="space-y-2">

@@ -955,9 +955,22 @@ export default function DocsContent() {
               ['enviar_arquivo', 'Sobe imagem, vídeo, áudio ou documento por base64 ou URL'],
               ['cancelar_agendamento', 'Desativa um agendamento pendente'],
               ['trocar_permissao', 'Muda permissões agora'],
-              ['editar_grupo', 'Muda nome, descrição e/ou foto agora']
+              ['editar_grupo', 'Muda nome, descrição e/ou foto agora'],
+              ['edicao_em_massa', 'Edita nome ({n}), descrição e foto por grupo ou tag em lote'],
+              ['desfazer_edicao_em_massa', 'Desfaz um lote de edição em massa restaurando estado anterior'],
+              ['agendamento_em_massa', 'Agenda mensagens/ações em massa por lista de grupos ou tag'],
+              ['relatorio_diario', 'Resumo de métricas diárias, cliques, enquetes e tags'],
+              ['listar_tags', 'Lista tags, grupos vinculados e capacidade de lotação'],
+              ['obter_documentacao', 'Retorna o manual completo de ferramentas MCP']
             ]}
           />
+
+          <p className="text-muted-foreground">
+            Para agentes LLM e crawlers, a especificação completa da API e MCP está disponível de forma pública e compacta em{' '}
+            <a href="/llm.txt" target="_blank" className="underline font-medium text-primary">/llm.txt</a>{' '}
+            e a documentação técnica da API em{' '}
+            <a href="/api/documentacao" target="_blank" className="underline font-medium text-primary">/api/documentacao</a>.
+          </p>
 
           <p className="text-muted-foreground">
             As ferramentas localizam o grupo por <code className="text-xs">groupId</code>,{' '}
