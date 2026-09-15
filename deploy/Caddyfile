@@ -9,7 +9,7 @@
 
 # Host desconhecido (scanners) nao chega nos backends
 :80, :443 {
-	return 404
+	respond 404
 }
 
 # Painel AlfaAltoGrup (Next.js)
