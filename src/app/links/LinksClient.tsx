@@ -69,8 +69,27 @@ export default function LinksClient() {
       .catch(() => {})
   }, [])
 
+  const shortGroupId = (groupId?: string | null) => {
+    const raw = String(groupId || '').trim()
+    if (!raw) return ''
+    if (raw.length <= 6) return raw
+    const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    const hex = raw.replace(/-/g, '').slice(0, 5).toLowerCase()
+    if (/^[0-9a-f]{5}$/.test(hex)) {
+      let num = parseInt(hex, 16)
+      let out = ''
+      for (let i = 0; i < 4; i++) {
+        out = BASE62[num % 62] + out
+        num = Math.floor(num / 62)
+      }
+      return out
+    }
+    return raw.slice(0, 4)
+  }
+
   const montarUrlCurta = (code: string, groupIdPadrao?: string | null) => {
-    const gid = grupoParaLink !== 'nenhum' ? grupoParaLink : groupIdPadrao || ''
+    const rawGid = grupoParaLink !== 'nenhum' ? grupoParaLink : groupIdPadrao || ''
+    const gid = shortGroupId(rawGid)
     const base = `${window.location.origin}/l/${code}`
     return gid ? `${base}?grupid=${encodeURIComponent(gid)}` : base
   }
@@ -182,7 +201,7 @@ export default function LinksClient() {
                   <SelectItem value="nenhum">grupid padrão do link</SelectItem>
                   {grupos.map((g: any) => (
                     <SelectItem key={g.id} value={g.id}>
-                      ?grupid= {g.name}
+                      ?grupid={shortGroupId(g.id)} ({g.name})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -219,9 +238,9 @@ export default function LinksClient() {
           {links.map(l => {
             const paramPreview =
               grupoParaLink !== 'nenhum'
-                ? `?grupid=${grupoParaLink}`
+                ? `?grupid=${shortGroupId(grupoParaLink)}`
                 : l.grupo?.id
-                  ? `?grupid=${l.grupo.id}`
+                  ? `?grupid=${shortGroupId(l.grupo.id)}`
                   : ''
             return (
               <div key={l.id} className="p-4 rounded-xl border border-border/50 bg-muted/20 space-y-2.5">

@@ -5,7 +5,7 @@
  */
 
 const { randomBytes } = require('crypto');
-const { appendGroupIdToTrackedLinks } = require('./bot-filter');
+const { appendGroupIdToTrackedLinks, shortGroupId } = require('./bot-filter');
 
 const FUSO = 'America/Sao_Paulo';
 
@@ -23,6 +23,7 @@ const CATALOGO_VARIAVEIS = [
       { chave: '{descricao_grupo}', exemplo: 'Grupo VIP de ofertas', descricao: 'Descrição/tópico atual do grupo' },
       { chave: '{topico}', exemplo: 'Grupo VIP de ofertas', descricao: 'Sinônimo de {descricao_grupo}' },
       { chave: '{slug_grupo}', exemplo: 'salvador-02', descricao: 'Identificador curto (slug) do grupo' },
+      { chave: '{id_grupo}', exemplo: '2xP9', descricao: 'Código curto de 4 caracteres do grupo (usado em ?grupid=)' },
       { chave: '{link_grupo}', exemplo: 'https://chat.whatsapp.com/...', descricao: 'Link de convite direto do grupo no WhatsApp' }
     ]
   },
@@ -219,6 +220,7 @@ async function montarContextoGrupo(prisma, group, extras = {}) {
     descricao_grupo: group?.topic || group?.description || '',
     topico: group?.topic || group?.description || '',
     slug_grupo: group?.slug || '',
+    id_grupo: shortGroupId(group?.id || ''),
     link_grupo: group?.inviteLink || linkTag || '',
     membros: String(membros),
     capacidade: String(capacidade),

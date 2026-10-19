@@ -1,19 +1,20 @@
 import { randomBytes } from 'crypto'
 import { prisma } from '@/lib/prisma'
+import { shortGroupId } from '@shared/bot-filter'
 
 /**
  * Encurtador com contagem de cliques.
  *
- * O link publicado vira /l/{code}?grupid={groupId}, que redireciona para o
+ * O link publicado vira /l/{code}?grupid={shortGroupId}, que redireciona para o
  * destino real, registra o clique por grupo/tag e injeta UTMs automaticamente.
  */
 
-/** Codigo curto: 7 caracteres, sem ambiguidade visual. */
+/** Codigo curto: 5 caracteres, sem ambiguidade visual (33,5 milhoes de combinacoes). */
 function gerarCodigo() {
   const alfabeto = 'abcdefghijkmnpqrstuvwxyz23456789'
-  const bytes = randomBytes(7)
+  const bytes = randomBytes(5)
   let saida = ''
-  for (let i = 0; i < 7; i++) saida += alfabeto[bytes[i] % alfabeto.length]
+  for (let i = 0; i < 5; i++) saida += alfabeto[bytes[i] % alfabeto.length]
   return saida
 }
 
@@ -24,7 +25,7 @@ async function codigoLivre() {
     if (!existe) return code
   }
   // Praticamente inalcancavel; evita loop infinito.
-  return gerarCodigo() + Date.now().toString(36).slice(-3)
+  return gerarCodigo() + Date.now().toString(36).slice(-2)
 }
 
 export function ehUrlValida(valor: string) {
@@ -56,7 +57,8 @@ export async function criarLinkRastreado(opcoes: {
 
 export function urlCurta(baseUrl: string, code: string, groupId?: string) {
   const base = `${baseUrl.replace(/\/+$/, '')}/l/${code}`
-  return groupId ? `${base}?grupid=${encodeURIComponent(groupId)}` : base
+  const gidCurto = groupId ? shortGroupId(groupId) : ''
+  return gidCurto ? `${base}?grupid=${encodeURIComponent(gidCurto)}` : base
 }
 
 /** Acha URLs soltas num texto. */

@@ -34,8 +34,8 @@ Documentação Swagger interativa disponível em `/api-docs`.
 
 ### Links Rastreáveis, Atribuição por Grupo (`?grupid=`) & UTMs
 - `GET /api/links`: Lista links curtos com cliques totais, cliques únicos, distribuição por hora (0–23h SP) e desdobramento por grupo (`porGrupo`).
-- `POST /api/links`: Cria ou retorna link rastreável `/l/[code]`.
-- `GET /l/[code]?grupid={id|slug|jid}`: Redirecionador com filtro anti-bot (ignora pré-visualizações do WhatsApp/redes sociais), deduplicação de clique único (janela de 10 min), atribuição ao grupo/tag de origem e injeção automática de parâmetros UTM (`utm_source=whatsapp`, `utm_medium=grupo`, `utm_campaign`, `utm_content`, `grupid`) na URL de destino.
+- `POST /api/links`: Cria ou retorna link rastreável `/l/[code]` (código curto de 5 caracteres).
+- `GET /l/[code]?grupid={shortId|id|slug|jid}`: Redirecionador com suporte a `grupid` encurtado de **4 caracteres Base62** (ex.: `/l/a3k9p?grupid=2xP9`), filtro anti-bot (ignora pré-visualizações do WhatsApp/redes sociais), deduplicação de clique único (janela de 10 min), atribuição ao grupo/tag de origem e injeção automática de parâmetros UTM (`utm_source=whatsapp`, `utm_medium=grupo`, `utm_campaign`, `utm_content`, `grupid`) na URL de destino.
 
 ### Edição em Massa
 - `POST /api/bulk/profile`: Aplica ou simula (`dryRun: true`) edição em lote de perfil em múltiplos grupos (via `groupIds` ou `tagId`/`tagSlug`).

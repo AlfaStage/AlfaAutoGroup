@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '64mb',
     },
     middlewareClientMaxBodySize: '64mb',
-    cpus: 2,
+    cpus: 1,
   },
   typescript: {
     ignoreBuildErrors: true,

@@ -60,21 +60,71 @@ function horaAtualSP(date = null) {
   return Number.isNaN(num) ? 0 : num % 24;
 }
 
+const BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/**
+ * Converte o UUID do grupo (ex.: "9f4b2c1a-7e3d-...") em um codigo curto de 4 caracteres Base62 (ex.: "2xP9").
+ * Reversivel para os 5 primeiros digitos hexadecimais do UUID (1.048.576 combinacoes).
+ */
+function shortGroupId(groupId) {
+  const raw = String(groupId || '').trim();
+  if (!raw) return '';
+  if (raw.length <= 6) return raw;
+
+  const hex = raw.replace(/-/g, '').slice(0, 5).toLowerCase();
+  if (/^[0-9a-f]{5}$/.test(hex)) {
+    let num = parseInt(hex, 16);
+    let out = '';
+    for (let i = 0; i < 4; i++) {
+      out = BASE62[num % 62] + out;
+      num = Math.floor(num / 62);
+    }
+    return out;
+  }
+  return raw.slice(0, 4);
+}
+
+/**
+ * Decodifica um codigo curto Base62 de 4 caracteres de volta para o prefixo hexadecimal de 5 digitos do UUID.
+ */
+function decodeShortGroupPrefix(code) {
+  const s = String(code || '').trim();
+  if (s.length !== 4) return null;
+  let num = 0;
+  for (let i = 0; i < 4; i++) {
+    const idx = BASE62.indexOf(s[i]);
+    if (idx < 0) return null;
+    num = num * 62 + idx;
+  }
+  if (num < 0 || num >= 0x100000) return null;
+  return num.toString(16).padStart(5, '0');
+}
+
 /**
  * Resolve o grupo a partir do parametro ?grupid= (ou ?groupid= / ?g=),
- * aceitando ID interno (UUID), slug ou evolutionGroupId (JID).
+ * aceitando codigo curto Base62 de 4 caracteres, prefixo hex, UUID completo, slug ou evolutionGroupId (JID).
  */
 async function resolveGroupParam(prisma, rawParam) {
   const val = String(rawParam || '').trim();
   if (!val) return null;
 
+  const orConditions = [
+    { id: val },
+    { slug: val },
+    { evolutionGroupId: val }
+  ];
+
+  const decodedHex = decodeShortGroupPrefix(val);
+  if (decodedHex) {
+    orConditions.push({ id: { startsWith: decodedHex } });
+  }
+  if (/^[0-9a-f]{4,12}$/i.test(val)) {
+    orConditions.push({ id: { startsWith: val.toLowerCase() } });
+  }
+
   return prisma.group.findFirst({
     where: {
-      OR: [
-        { id: val },
-        { slug: val },
-        { evolutionGroupId: val }
-      ]
+      OR: orConditions
     },
     include: {
       tags: {
@@ -87,27 +137,29 @@ async function resolveGroupParam(prisma, rawParam) {
 }
 
 /**
- * Anexa automaticamente ?grupid=<groupId> aos links /l/<codigo> presentes num texto
- * antes do envio pelo worker, permitindo saber exatamente de qual grupo veio cada clique.
+ * Anexa automaticamente ?grupid=<shortId> (4 caracteres) aos links /l/<codigo> presentes num texto
+ * antes do envio pelo worker, mantendo o link muito curto e identificando o grupo de origem.
  */
 function appendGroupIdToTrackedLinks(text, groupId) {
   if (!text || !groupId || typeof text !== 'string') return text;
+  const shortId = shortGroupId(groupId);
+  if (!shortId) return text;
 
   return text.replace(
     /(https?:\/\/[^\s"'<>]+\/l\/[a-zA-Z0-9_-]+|\/l\/[a-zA-Z0-9_-]+)(\?[^\s"'<>]*)?/g,
     (_match, basePath, query = '') => {
       if (!query) {
-        return `${basePath}?grupid=${encodeURIComponent(groupId)}`;
+        return `${basePath}?grupid=${encodeURIComponent(shortId)}`;
       }
       if (/[?&](grupid|groupid|g)=/i.test(query)) {
         const updatedQuery = query.replace(
           /([?&])(?:grupid|groupid|g)=[^&#\s"'<>]*/i,
-          `$1grupid=${encodeURIComponent(groupId)}`
+          `$1grupid=${encodeURIComponent(shortId)}`
         );
         return `${basePath}${updatedQuery}`;
       }
       const sep = query.startsWith('?') ? '&' : '?';
-      return `${basePath}${query}${sep}grupid=${encodeURIComponent(groupId)}`;
+      return `${basePath}${query}${sep}grupid=${encodeURIComponent(shortId)}`;
     }
   );
 }
@@ -154,7 +206,7 @@ function enrichDestinationUrlWithUtm(destUrl, group, tag, campaign) {
       parsed.searchParams.set('utm_content', String(groupSlug || groupName));
     }
     if (group?.id && !parsed.searchParams.has('grupid')) {
-      parsed.searchParams.set('grupid', group.id);
+      parsed.searchParams.set('grupid', shortGroupId(group.id));
     }
 
     return parsed.toString();
@@ -167,6 +219,8 @@ module.exports = {
   isPreviewBot,
   registerAndCheckUnique,
   horaAtualSP,
+  shortGroupId,
+  decodeShortGroupPrefix,
   resolveGroupParam,
   appendGroupIdToTrackedLinks,
   enrichDestinationUrlWithUtm
