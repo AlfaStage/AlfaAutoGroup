@@ -19,3 +19,6 @@ Autenticação: `Authorization: Bearer <API_KEY>`
 12. `enviar_arquivo`: Faz upload de imagem, vídeo, áudio ou documento (via base64 ou URL) e devolve a URL pública permanente.
 13. `relatorio_diario`: Extrai o relatório consolidado de envios, falhas, cliques e tags, com opção de texto para WhatsApp.
 14. `listar_tags`: Lista as tags cadastradas, grupos associados e status de lotação.
+15. `obter_documentacao`: Retorna a documentação técnica completa ou detalhamento de ferramentas do MCP.
+
+As ferramentas `agendamento_em_massa` e `edicao_em_massa` suportam segmentação direta por `tagSlug` ou `tagId`, aplicando as regras a todos os grupos pertencentes à tag.

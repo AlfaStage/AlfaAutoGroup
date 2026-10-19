@@ -522,13 +522,15 @@ const FERRAMENTAS: Ferramenta[] = [
     name: 'edicao_em_massa',
     description:
       'Edita nome (usando template com {n}, {nn}, {total}, {nome}), descrição e/ou foto '
-      + 'de múltiplos grupos em lote com espaçamento. Suporta dryRun para conferir a prévia antes de aplicar.',
+      + 'de múltiplos grupos em lote com espaçamento. Permite passar groupIds ou tagSlug/tagId. '
+      + 'Suporta dryRun para conferir a prévia antes de aplicar.',
     inputSchema: {
       type: 'object',
-      required: ['groupIds'],
       properties: {
         groupIds: { type: 'array', items: { type: 'string' }, description: 'IDs dos grupos' },
-        nameTemplate: { type: 'string', description: 'Template de nome, ex.: "Turma {n} - {nome}"' },
+        tagSlug: { type: 'string', description: 'Slug da tag (aplica a todos os grupos com esta tag)' },
+        tagId: { type: 'string', description: 'ID da tag (aplica a todos os grupos com esta tag)' },
+        nameTemplate: { type: 'string', description: 'Template de nome com variáveis {n}, {nn}, {total}, {nome}. Ex: "Grupo {n} - VIP"' },
         description: { type: 'string', description: 'Nova descrição para os grupos' },
         picture: { type: 'string', description: 'URL pública da nova foto de perfil' },
         spacingSeconds: { type: 'number', description: 'Intervalo em segundos entre cada grupo (mínimo 15s)' },
@@ -536,8 +538,19 @@ const FERRAMENTAS: Ferramenta[] = [
       }
     },
     handler: async (args) => {
-      const ids = Array.isArray(args.groupIds) ? args.groupIds : []
-      if (ids.length === 0) return texto('Informe ao menos um groupId no array groupIds.')
+      let ids: string[] = Array.isArray(args.groupIds) ? [...args.groupIds] : []
+      if (args.tagSlug || args.tagId) {
+        const tag = await prisma.tag.findFirst({
+          where: args.tagId ? { id: args.tagId } : { slug: args.tagSlug },
+          include: { groups: true }
+        })
+        if (tag) {
+          const idsDaTag = tag.groups.map(g => g.groupId)
+          ids = Array.from(new Set([...ids, ...idsDaTag]))
+        }
+      }
+
+      if (ids.length === 0) return texto('Nenhum grupo informado. Forneça groupIds ou tagSlug/tagId.')
 
       const grupos = await prisma.group.findMany({
         where: { id: { in: ids } },
@@ -885,6 +898,70 @@ const FERRAMENTAS: Ferramenta[] = [
           }))
         }
       }))
+    }
+  },
+
+  {
+    name: 'obter_documentacao',
+    description:
+      'Retorna a documentação completa ou específica de ferramentas do servidor MCP AlfaAltoGrup. '
+      + 'Explica ferramentas disponíveis, parâmetros, tipos de agendamento, formatação de templates {n}, anti-ban e boas práticas.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ferramenta: {
+          type: 'string',
+          description: 'Nome específico da ferramenta para obter detalhes (opcional). Se omitido, retorna a documentação completa.'
+        }
+      }
+    },
+    handler: async (args) => {
+      const docsCompletos: Record<string, any> = {
+        servidor: 'AlfaAltoGrup MCP Server (JSON-RPC 2.0)',
+        versao: '1.1.0',
+        visaoGeral: 'Servidor MCP HTTP para orquestração autônoma de grupos WhatsApp conectados via Evolution GO.',
+        regrasAntiBan: {
+          antiBanJitter: 'Mensagens e enquetes para múltiplos grupos recebem automaticamente espaçamento/jitter de até 1 minuto para evitar banimento.',
+          acoesDeGrupo: 'Trocas de permissão e edições de perfil (nome/descrição/foto) utilizam espaçamento manual (mínimo 10s, padrão 45s).'
+        },
+        tiposDeAcao: {
+          text: 'Envio de mensagem de texto com suporte a markdown WhatsApp e link tracking automático.',
+          media: 'Envio de mídia (image, video, audio, document) com legenda e nome do arquivo opcional.',
+          button: 'Envio de botões interativos (reply ou CTA link).',
+          poll: 'Enquetes interativas com múltiplas opções configuráveis.',
+          permission: 'Alteração em lote de permissões (announcement: aberto/fechado, restrict: admins/todos alteram dados).',
+          profile: 'Edição de nome, descrição (tópico) e foto do grupo com templates numéricos {n}.'
+        },
+        templatesNome: {
+          '{n}': 'Posição sequencial do grupo no lote (1, 2, 3...)',
+          '{nn}': 'Posição sequencial com zero à esquerda (01, 02...)',
+          '{total}': 'Quantidade total de grupos no lote',
+          '{nome}': 'Nome atual do grupo antes da alteração'
+        },
+        ferramentas: FERRAMENTAS.map(f => ({
+          name: f.name,
+          description: f.description,
+          inputSchema: f.inputSchema
+        }))
+      }
+
+      if (args.ferramenta) {
+        const f = FERRAMENTAS.find(item => item.name.toLowerCase() === args.ferramenta.toLowerCase().trim())
+        if (!f) {
+          return texto({
+            erro: `Ferramenta '${args.ferramenta}' não encontrada.`,
+            ferramentasDisponiveis: FERRAMENTAS.map(item => item.name)
+          })
+        }
+        return texto({
+          ferramenta: f.name,
+          descricao: f.description,
+          inputSchema: f.inputSchema,
+          comoUsar: `Chame tools/call com name: "${f.name}" e arguments conforme o schema.`
+        })
+      }
+
+      return texto(docsCompletos)
     }
   }
 ]

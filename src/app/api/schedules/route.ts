@@ -80,34 +80,62 @@ export async function POST(request: Request) {
   try {
     const rawData = await request.json()
     
-    // Suportar tanto array de agendamentos, objeto com { groupIds, schedules }, ou objeto simples
+    const resolverTag = async (tagRef?: string): Promise<string[]> => {
+      if (!tagRef) return []
+      const rels = await prisma.groupTag.findMany({
+        where: {
+          OR: [
+            { tagId: tagRef },
+            { tag: { slug: tagRef } },
+            { tag: { name: tagRef } }
+          ]
+        },
+        select: { groupId: true }
+      })
+      return rels.map(r => r.groupId)
+    }
+
+    // Suportar tanto array de agendamentos, objeto com { groupIds, schedules }, por tag, ou objeto simples
     const items: Array<{ groupIds: string[]; type: string; content: any; scheduledAt: string }> = []
 
     if (Array.isArray(rawData)) {
       for (const item of rawData) {
-        const gids = Array.isArray(item.groupIds) && item.groupIds.length > 0
-          ? item.groupIds
-          : (item.groupId ? [item.groupId] : [])
+        const itemTag = await resolverTag(item.tagId || item.tagSlug || item.tag)
+        const gids = Array.from(new Set([
+          ...(Array.isArray(item.groupIds) ? item.groupIds : []),
+          ...(item.groupId ? [item.groupId] : []),
+          ...itemTag
+        ]))
         if (gids.length > 0 && item.type && item.content && item.scheduledAt) {
           items.push({ groupIds: gids, type: item.type, content: item.content, scheduledAt: item.scheduledAt })
         }
       }
     } else if (rawData && Array.isArray(rawData.schedules) && rawData.schedules.length > 0) {
-      const gids = Array.isArray(rawData.groupIds) && rawData.groupIds.length > 0
-        ? rawData.groupIds
-        : (rawData.groupId ? [rawData.groupId] : [])
+      const tagGlobal = await resolverTag(rawData.tagId || rawData.tagSlug || rawData.tag)
+      const baseGids = Array.from(new Set([
+        ...(Array.isArray(rawData.groupIds) ? rawData.groupIds : []),
+        ...(rawData.groupId ? [rawData.groupId] : []),
+        ...tagGlobal
+      ]))
       for (const sch of rawData.schedules) {
-        const itemGids = Array.isArray(sch.groupIds) && sch.groupIds.length > 0
-          ? sch.groupIds
-          : (sch.groupId ? [sch.groupId] : gids)
+        const schTag = await resolverTag(sch.tagId || sch.tagSlug || sch.tag)
+        const itemGids = Array.from(new Set([
+          ...(Array.isArray(sch.groupIds) && sch.groupIds.length > 0
+            ? sch.groupIds
+            : (sch.groupId ? [sch.groupId] : baseGids)),
+          ...schTag
+        ]))
         if (itemGids.length > 0 && sch.type && sch.content && sch.scheduledAt) {
           items.push({ groupIds: itemGids, type: sch.type, content: sch.content, scheduledAt: sch.scheduledAt })
         }
       }
     } else if (rawData) {
-      const gids = Array.isArray(rawData.groupIds) && rawData.groupIds.length > 0
-        ? rawData.groupIds
-        : (rawData.groupId ? [rawData.groupId] : [])
+      const tagGlobal = await resolverTag(rawData.tagId || rawData.tagSlug || rawData.tag)
+      const gids = Array.from(new Set([
+        ...(Array.isArray(rawData.groupIds) ? rawData.groupIds : []),
+        ...(rawData.groupId ? [rawData.groupId] : []),
+        ...tagGlobal
+      ]))
       items.push({ groupIds: gids, type: rawData.type, content: rawData.content, scheduledAt: rawData.scheduledAt })
     }
 

@@ -14,6 +14,26 @@ GLOBAL_KEY=$(grep -E '^EVOLUTION_API_KEY=' "$ENV_FILE" | cut -d= -f2-)
 
 log() { echo "$(date -Is) $*" >> "$LOG"; }
 
+# Limpa conexoes ociosas (> 2h) vazadas pela Evolution GO no Postgres,
+# preservando sempre as 6 conexoes mais recentes do pool ativo.
+reaped=$(sudo docker exec deploy-postgres-1 psql -U postgres -tAq -c "
+  SELECT count(pg_terminate_backend(pid))
+  FROM pg_stat_activity
+  WHERE datname IN ('evogo_auth', 'evogo_users')
+    AND state = 'idle'
+    AND state_change < now() - interval '2 hours'
+    AND pid NOT IN (
+      SELECT pid FROM pg_stat_activity
+      WHERE datname IN ('evogo_auth', 'evogo_users')
+      ORDER BY state_change DESC
+      LIMIT 6
+    );
+" 2>/dev/null | tr -d '[:space:]' || echo "0")
+
+if [ -n "$reaped" ] && [ "$reaped" != "0" ]; then
+  log "[postgres] $reaped conexao(oes) ociosa(s) vazada(s) encerrada(s)"
+fi
+
 instances=$(curl -sf --max-time 25 -H "apikey: $GLOBAL_KEY" "$API_BASE/instance/all" \
   | python3 -c 'import sys,json
 try:

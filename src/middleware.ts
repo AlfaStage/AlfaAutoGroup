@@ -3,13 +3,34 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  // Bloqueia scanners automatizados que sondam Server Actions inexistentes
+  if (request.headers.has('next-action')) {
+    return new NextResponse(null, { status: 404 })
+  }
+
   const { pathname } = request.nextUrl
 
   // Public routes that don't require authentication
   // '/l' e o encurtador: quem clica no WhatsApp nao tem sessao
   // '/api/upload' e '/api/uploads' lidam com midia diretamente para nao clonar/truncar streams de arquivos no middleware edge (a rota valida autenticacao internamente)
-  const publicRoutes = ['/login', '/api/auth', '/api/webhook', '/api/upload', '/api/uploads', '/l/', '/g/']
-  const isPublic = publicRoutes.some(route => pathname.startsWith(route))
+  // '/documentacao', '/api-docs', '/api/swagger', '/api/documentacao', '/api/docs', '/llm.txt' e '/llms.txt' sao publicos para humanos e agentes
+  const publicRoutes = [
+    '/login',
+    '/api/auth',
+    '/api/webhook',
+    '/api/upload',
+    '/api/uploads',
+    '/l/',
+    '/g/',
+    '/documentacao',
+    '/api-docs',
+    '/api/swagger',
+    '/api/documentacao',
+    '/api/docs',
+    '/llm.txt',
+    '/llms.txt'
+  ]
+  const isPublic = publicRoutes.some(route => pathname === route || pathname.startsWith(route))
   
   // Static assets and internal next routes
   if (

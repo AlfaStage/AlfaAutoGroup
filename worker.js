@@ -64,12 +64,13 @@ async function runGroupSchedule(schedule, content) {
   // Falha transitoria: reagenda em vez de dar o agendamento por perdido.
   if (result.status === 'error' && attempt < TASK_MAX_ATTEMPTS) {
     const minutos = TASK_BACKOFF_MIN[attempt - 1] || 30;
+    const jitterMs = (5 + Math.floor(Math.random() * 20)) * 1000;
     await prisma.schedule.update({
       where: { id: schedule.id },
       data: {
         status: 'pending',
         attempts: attempt,
-        adjustedAt: new Date(Date.now() + minutos * 60 * 1000),
+        adjustedAt: new Date(Date.now() + minutos * 60 * 1000 + jitterMs),
         errorMessage: `tentativa ${attempt}: ${result.message}`
       }
     });
@@ -191,6 +192,9 @@ async function processSchedules() {
       // que confere o estado atual antes de mexer em qualquer coisa.
       if (schedule.type === 'permission' || schedule.type === 'profile') {
         await runGroupSchedule(schedule, content);
+        if (pendingSchedules.length > 1) {
+          await new Promise(r => setTimeout(r, 1500));
+        }
         continue;
       }
 
@@ -330,7 +334,7 @@ const fs = require('fs');
 const path = require('path');
 
 function cleanOldUploads() {
-  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+  const uploadsDir = path.join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadsDir)) return;
 
   const files = fs.readdirSync(uploadsDir);
@@ -339,6 +343,8 @@ function cleanOldUploads() {
   let deletedCount = 0;
 
   files.forEach(file => {
+    // Preserva fotos de perfil de grupos cacheadas
+    if (file.startsWith('group-')) return;
     const filePath = path.join(uploadsDir, file);
     try {
       const stats = fs.statSync(filePath);
@@ -354,6 +360,23 @@ function cleanOldUploads() {
   if (deletedCount > 0) {
     console.log(`[Worker] Limpeza concluída: ${deletedCount} arquivos antigos de mídia removidos.`);
   }
+}
+
+function normalizePhone(raw) {
+  if (!raw) return '';
+  return String(raw).split('@')[0].split(':')[0].trim();
+}
+
+function participantPhone(p) {
+  return normalizePhone(p?.PhoneNumber || p?.phoneNumber)
+    || normalizePhone(p?.JID || p?.jid || p?.id);
+}
+
+function participantLid(p) {
+  const lid = p?.LID || p?.lid || '';
+  if (lid) return normalizePhone(lid);
+  const jid = p?.JID || p?.jid || '';
+  return String(jid).includes('@lid') ? normalizePhone(jid) : '';
 }
 
 let lastSyncDate = null;
@@ -384,75 +407,84 @@ async function dailySync() {
         const token = inst.token || (inst.Auth && inst.Auth.token);
         if (!name || !token) continue;
 
-        // 2. Configurar Webhook apenas se estiver em produção
-        if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_APP_URL) {
+        // 2. Reconectar apenas se a instância estiver desconectada (evita vazar conexões no Postgres da Evolution GO)
+        if (!inst.connected) {
           try {
-            const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook`;
-            console.log(`[Worker] Configurando webhook para instância ${name}: ${webhookUrl}`);
-            
-            await fetch(`${EVOLUTION_API_URL}/instance/connect`, {
+            console.log(`[Worker] Reconectando instância ${name}...`);
+            await fetch(`${EVOLUTION_API_URL}/instance/reconnect`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'apikey': EVOLUTION_API_KEY,
-                'instanceName': name
+                'apikey': token
               },
-              body: JSON.stringify({
-                instanceName: name,
-                webhookUrl: webhookUrl,
-                subscribe: ["MESSAGE"],
-                immediate: true
-              })
+              body: JSON.stringify({})
             });
           } catch (e) {
-            console.error(`[Worker] Erro ao configurar webhook da instância ${name}`, e);
+            console.error(`[Worker] Erro ao reconectar instância ${name}`, e);
           }
         }
 
         // 3. Sincronizar Grupos
         try {
           console.log(`[Worker] Sincronizando grupos da instância ${name}...`);
-          const groupsRes = await fetch(`${EVOLUTION_API_URL}/group/list?instanceName=${name}`, {
+          const groupsRes = await fetch(`${EVOLUTION_API_URL}/group/list`, {
             headers: { 'apikey': token }
           });
           
           if (groupsRes.ok) {
             const groupsData = await groupsRes.json();
-            const fetchedGroups = Array.isArray(groupsData) ? groupsData : [];
+            const fetchedGroups = Array.isArray(groupsData) ? groupsData : (groupsData.data || []);
             
             for (const g of fetchedGroups) {
-              const id = g.id || g.jid || g.JID;
-              const subject = g.subject || g.name || g.Name;
-              if (!id || !subject) continue;
+              const evolutionGroupId = g.JID || g.jid || g.id;
+              const subject = g.Name || g.name || g.subject;
+              if (!evolutionGroupId || !subject) continue;
+
+              const participants = g.Participants || g.participants || [];
+              const commonData = {
+                name: subject,
+                description: g.Topic || g.desc || g.Description || '',
+                topic: g.Topic || '',
+                instanceName: name,
+                participantCount: Number(g.ParticipantCount || (participants.length ?? 0)) || 0,
+                isAnnounce: Boolean(g.IsAnnounce),
+                isLocked: Boolean(g.IsLocked),
+                isApprovalRequired: Boolean(g.IsJoinApprovalRequired),
+                adminOnlyAdd: String(g.MemberAddMode || '').toLowerCase() === 'admin_add',
+                ownerPhone: normalizePhone(g.OwnerPN || g.OwnerJID)
+              };
 
               const group = await prisma.group.upsert({
-                where: { evolutionGroupId: id },
-                update: {
-                  name: subject,
-                  description: g.desc || g.Description || '',
-                  instanceName: name
+                where: {
+                  instanceName_evolutionGroupId: { instanceName: name, evolutionGroupId }
                 },
+                update: commonData,
                 create: {
-                  evolutionGroupId: id,
-                  name: subject,
-                  description: g.desc || g.Description || '',
-                  slug: id.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15) + Math.floor(Math.random()*1000),
-                  instanceName: name
+                  ...commonData,
+                  evolutionGroupId,
+                  slug: evolutionGroupId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 15) + Math.floor(Math.random() * 1000)
                 }
               });
               
               // Sincronizar membros
-              const participants = g.participants || g.Participants || [];
               if (Array.isArray(participants) && participants.length > 0) {
                 await prisma.groupMember.deleteMany({
                   where: { groupId: group.id }
                 });
 
-                const membersData = participants.map(p => ({
-                  groupId: group.id,
-                  phone: p.id || p.jid || p.JID || p.PhoneNumber || 'unknown',
-                  role: p.admin || p.isAdmin || p.IsAdmin ? 'admin' : 'participant'
-                }));
+                const membersData = participants.map(p => {
+                  const isAdmin = Boolean(p.IsAdmin || p.isAdmin || p.admin);
+                  const isSuperAdmin = Boolean(p.IsSuperAdmin || p.isSuperAdmin);
+                  return {
+                    groupId: group.id,
+                    phone: participantPhone(p) || 'desconhecido',
+                    lid: participantLid(p) || null,
+                    displayName: p.DisplayName || p.displayName || null,
+                    isAdmin: isAdmin || isSuperAdmin,
+                    isSuperAdmin,
+                    role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant'
+                  };
+                });
 
                 await prisma.groupMember.createMany({
                   data: membersData

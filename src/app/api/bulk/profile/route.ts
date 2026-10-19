@@ -38,10 +38,28 @@ export async function POST(request: Request) {
 
     const body = await request.json() as PedidoEmMassa & {
       groupIds?: string[]
+      tagId?: string
+      tagSlug?: string
+      tag?: string
       dryRun?: boolean
     }
 
-    const ids = Array.isArray(body.groupIds) ? body.groupIds : []
+    let ids = Array.isArray(body.groupIds) ? [...body.groupIds] : []
+    const tagRef = body.tagId || body.tagSlug || body.tag
+    if (tagRef) {
+      const rels = await prisma.groupTag.findMany({
+        where: {
+          OR: [
+            { tagId: tagRef },
+            { tag: { slug: tagRef } },
+            { tag: { name: tagRef } }
+          ]
+        },
+        select: { groupId: true }
+      })
+      const idsDaTag = rels.map(r => r.groupId)
+      ids = Array.from(new Set([...ids, ...idsDaTag]))
+    }
 
     const grupos = await prisma.group.findMany({
       where: { id: { in: ids } },
