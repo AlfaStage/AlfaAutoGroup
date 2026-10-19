@@ -3,6 +3,11 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  // Bloqueia scanners automatizados que sondam Server Actions inexistentes
+  if (request.headers.has('next-action')) {
+    return new NextResponse(null, { status: 404 })
+  }
+
   const { pathname } = request.nextUrl
 
   // Public routes that don't require authentication

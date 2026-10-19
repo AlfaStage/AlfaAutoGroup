@@ -49,16 +49,24 @@ async function evoCall(path, options) {
   const init = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
 
-  const res = await fetch(`${apiUrl()}${path}`, init);
+  let lastRes = null;
+  let text = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    lastRes = await fetch(`${apiUrl()}${path}`, init);
+    text = await lastRes.text();
+    const isRateLimited =
+      lastRes.status === 429 || /rate-overlimit|status 429/i.test(text);
+    if (!isRateLimited || attempt === 2) break;
+    await new Promise((r) => setTimeout(r, (attempt + 1) * 2500));
+  }
 
-  const text = await res.text();
   let data = null;
   try {
     data = JSON.parse(text);
   } catch (e) {
     // resposta nao e JSON
   }
-  return { ok: res.ok, status: res.status, data, text };
+  return { ok: lastRes.ok, status: lastRes.status, data, text };
 }
 
 /** Estado atual do grupo, normalizado nos mesmos nomes que usamos no banco. */

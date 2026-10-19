@@ -15,6 +15,8 @@
 # Painel AlfaAltoGrup (Next.js)
 {$APP_DOMAIN} {
 	encode zstd gzip
+	@scanner_action header Next-Action *
+	respond @scanner_action 404
 	request_body {
 		max_size 64MB
 	}
