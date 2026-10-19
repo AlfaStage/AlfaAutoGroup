@@ -58,7 +58,7 @@ export async function HEAD(_request: Request, { params }: { params: Promise<{ fi
   if (!alvo) return new NextResponse(null, { status: 404 });
 
   try {
-    const info = await stat(alvo.filepath);
+    const info = await stat(/*turbopackIgnore: true*/ alvo.filepath);
     return new NextResponse(null, { status: 200, headers: cabecalhos(alvo.safeName, info.size) });
   } catch {
     return new NextResponse(null, { status: 404 });
@@ -71,8 +71,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ file
   if (!alvo) return new NextResponse('File not found', { status: 404 });
 
   try {
-    const info = await stat(alvo.filepath);
-    const buffer = await readFile(alvo.filepath);
+    const info = await stat(/*turbopackIgnore: true*/ alvo.filepath);
+    const buffer = await readFile(/*turbopackIgnore: true*/ alvo.filepath);
     const headers = cabecalhos(alvo.safeName, info.size);
 
     // Download parcial: player de video e a propria Evolution pedem faixas

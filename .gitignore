@@ -48,7 +48,7 @@ next-env.d.ts
 *.sqlite3
 
 # Cache de fotos e arquivos enviados (dados, nao codigo)
-uploads/
+/uploads/
 
 # Config local do editor
 .claude/
