@@ -42,17 +42,19 @@ model Group {
 }
 
 model GroupMember {
-  id           String  @id @default(uuid())
+  id           String   @id @default(uuid())
   groupId      String
   phone        String // número real, sem sufixo (vem de Participants[].PhoneNumber)
   lid          String? // identificador anônimo do WhatsApp, quando existe
   displayName  String?
-  isAdmin      Boolean @default(false)
-  isSuperAdmin Boolean @default(false)
-  role         String  @default("participant") // admin, participant
-  group        Group   @relation(fields: [groupId], references: [id])
+  isAdmin      Boolean  @default(false)
+  isSuperAdmin Boolean  @default(false)
+  role         String   @default("participant") // admin, participant
+  firstSeenAt  DateTime @default(now())
+  group        Group    @relation(fields: [groupId], references: [id])
 
   @@index([groupId])
+  @@index([phone])
 }
 
 model Schedule {
@@ -60,6 +62,7 @@ model Schedule {
   groupId            String
   type               String // text, media, button, poll, permission, profile
   content            String // JSON string
+  campaign           String? // nome/codigo da campanha ou lote
   scheduledAt        DateTime // Original requested time
   adjustedAt         DateTime // Adjusted time for anti-ban
   status             String        @default("pending") // pending, sent, skipped, deactivated, error, processing
@@ -73,6 +76,9 @@ model Schedule {
   updatedAt          DateTime      @updatedAt
 
   group Group @relation(fields: [groupId], references: [id])
+
+  @@index([status, adjustedAt])
+  @@index([campaign])
 }
 
 model Message {
@@ -132,35 +138,53 @@ model TrackedLink {
 model LinkClick {
   id        String      @id @default(uuid())
   linkId    String
+  groupId   String? // grupo de origem identificado via ?grupid= ou link.groupId
+  isUnique  Boolean     @default(true)
+  hour      Int? // hora (0-23) no fuso de Sao Paulo
   clickedAt DateTime    @default(now())
   userAgent String?
   referer   String?
   link      TrackedLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
   @@index([linkId, clickedAt])
+  @@index([groupId])
 }
 
 /// Agrupa grupos por caracteristica (cidade, unidade, servico...).
 /// Tambem carrega a regra de lotacao: quando o grupo ativo enche, o proximo
 /// e criado automaticamente e o link de convite passa a apontar para ele.
 model Tag {
-  id             String   @id @default(uuid())
-  name           String   @unique
-  slug           String   @unique
-  color          String   @default("#6366f1")
+  id             String     @id @default(uuid())
+  name           String     @unique
+  slug           String     @unique
+  color          String     @default("#6366f1")
   description    String?
   // --- gestao de lotacao ---
-  autoCreate     Boolean  @default(false)
-  capacity       Int      @default(950)
+  autoCreate     Boolean    @default(false)
+  capacity       Int        @default(950)
   namePattern    String? // ex.: "Salvador {n}" — {n} vira a posicao do grupo
-  cloneSchedules Boolean  @default(true)
-  copyAdmins     Boolean  @default(true) // admins comuns da tag entram e viram admin no grupo novo
+  cloneSchedules Boolean    @default(true)
+  copyAdmins     Boolean    @default(true) // admins comuns da tag entram e viram admin no grupo novo
   instanceName   String? // instancia usada para criar os grupos novos
-  inviteCode     String?  @unique // codigo do link publico /g/{codigo}
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  inviteCode     String?    @unique // codigo do link publico /g/{codigo}
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   groups GroupTag[]
+  clicks TagClick[]
+}
+
+/// Clique registrado no link publico /g/{codigo} da tag (topo do funil de entrada).
+model TagClick {
+  id        String   @id @default(uuid())
+  tagId     String
+  groupId   String? // grupo para o qual o visitante foi redirecionado
+  source    String? // utm_source ou origem quando informado
+  isUnique  Boolean  @default(true)
+  clickedAt DateTime @default(now())
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@index([tagId, clickedAt])
 }
 
 model GroupTag {
@@ -176,12 +200,14 @@ model GroupTag {
   @@index([tagId])
 }
 
-/// Contagem diaria de membros, para saber quantas pessoas entraram no dia.
+/// Contagem diaria de membros, para saber quantas pessoas entraram e sairam no dia.
 model GroupDailySnapshot {
   id          String   @id @default(uuid())
   groupId     String
   date        String // YYYY-MM-DD no fuso de Sao Paulo
   memberCount Int
+  joinedCount Int      @default(0) // entradas reais detectadas no dia
+  leftCount   Int      @default(0) // saidas reais (evasao/churn) detectadas no dia
   createdAt   DateTime @default(now())
 
   group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
