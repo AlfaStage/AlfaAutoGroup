@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { isAuthenticated } from '@/lib/auth';
 import {
   getInstanceToken,
@@ -9,10 +9,9 @@ import {
   participantPhone,
   participantLid
 } from '@/lib/evolution';
+import { hojeSP } from '@shared/ops';
 import { writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
-
-const prisma = new PrismaClient();
 
 // A URL de foto do WhatsApp expira, então guardamos o arquivo e só
 // atualizamos de tempos em tempos — evita 25 downloads a cada sincronização.
@@ -99,6 +98,7 @@ export async function POST(
 
     let picturesUpdated = 0;
     let membersSynced = 0;
+    const hoje = hojeSP();
 
     for (const g of fetchedGroups) {
       const evolutionGroupId = g.JID || g.jid || g.id;
@@ -158,24 +158,67 @@ export async function POST(
 
       const participants = g.Participants || g.participants || [];
       if (Array.isArray(participants) && participants.length > 0) {
+        const existingMembers = await prisma.groupMember.findMany({
+          where: { groupId: group.id },
+          select: { phone: true, firstSeenAt: true }
+        });
+        const firstSeenMap = new Map<string, Date>();
+        for (const m of existingMembers) {
+          if (m.phone && m.phone !== 'desconhecido') {
+            firstSeenMap.set(m.phone, m.firstSeenAt);
+          }
+        }
+
         await prisma.groupMember.deleteMany({ where: { groupId: group.id } });
 
+        const now = new Date();
+        const newPhonesSet = new Set<string>();
         const membersData = participants.map((p: any) => {
           const isAdmin = Boolean(p.IsAdmin || p.isAdmin || p.admin);
           const isSuperAdmin = Boolean(p.IsSuperAdmin || p.isSuperAdmin);
+          const phone = participantPhone(p) || 'desconhecido';
+          if (phone !== 'desconhecido') newPhonesSet.add(phone);
           return {
             groupId: group.id,
-            phone: participantPhone(p) || 'desconhecido',
+            phone,
             lid: participantLid(p) || null,
             displayName: p.DisplayName || p.displayName || null,
             isAdmin: isAdmin || isSuperAdmin,
             isSuperAdmin,
-            role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant'
+            role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant',
+            firstSeenAt: firstSeenMap.get(phone) || now
           };
         });
 
         await prisma.groupMember.createMany({ data: membersData });
         membersSynced += membersData.length;
+
+        let joined = 0;
+        let left = 0;
+        if (firstSeenMap.size > 0) {
+          for (const phone of newPhonesSet) {
+            if (!firstSeenMap.has(phone)) joined++;
+          }
+          for (const oldPhone of firstSeenMap.keys()) {
+            if (!newPhonesSet.has(oldPhone)) left++;
+          }
+        }
+
+        await prisma.groupDailySnapshot.upsert({
+          where: { groupId_date: { groupId: group.id, date: hoje } },
+          update: {
+            memberCount: membersData.length,
+            ...(joined > 0 ? { joinedCount: { increment: joined } } : {}),
+            ...(left > 0 ? { leftCount: { increment: left } } : {})
+          },
+          create: {
+            groupId: group.id,
+            date: hoje,
+            memberCount: membersData.length,
+            joinedCount: joined,
+            leftCount: left
+          }
+        }).catch(() => {});
       }
     }
 

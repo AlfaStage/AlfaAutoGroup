@@ -3,7 +3,19 @@ const { runGroupTask } = require('./shared/group-tasks');
 const ops = require('./shared/ops');
 const capacidade = require('./shared/capacity');
 const relatorio = require('./shared/report');
+const variaveis = require('./shared/variables');
 const prisma = new PrismaClient();
+
+// Configura SQLite WAL para leitura concorrente sem bloqueios com o processo web
+Promise.resolve()
+  .then(async () => {
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL;');
+    await prisma.$queryRawUnsafe('PRAGMA synchronous = NORMAL;');
+    await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 5000;');
+    await prisma.$queryRawUnsafe('PRAGMA temp_store = MEMORY;');
+  })
+  .catch(() => {});
+
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL;
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
 
@@ -186,7 +198,11 @@ async function processSchedules() {
         continue;
       }
 
-      const content = JSON.parse(schedule.content);
+      const rawContent = JSON.parse(schedule.content);
+      const ctxVariaveis = await variaveis.montarContextoGrupo(prisma, schedule.group, {
+        campaign: schedule.campaign || ''
+      });
+      const content = variaveis.resolverConteudoAgendamento(schedule.type, rawContent, ctxVariaveis);
 
       // Permissao e perfil nao sao mensagens: vao para o executor de grupo,
       // que confere o estado atual antes de mexer em qualquer coisa.
@@ -466,29 +482,73 @@ async function dailySync() {
                 }
               });
               
-              // Sincronizar membros
+              // Sincronizar membros preservando firstSeenAt e calculando entradas/saídas reais
               if (Array.isArray(participants) && participants.length > 0) {
+                const existingMembers = await prisma.groupMember.findMany({
+                  where: { groupId: group.id },
+                  select: { phone: true, firstSeenAt: true }
+                });
+                const firstSeenMap = new Map();
+                for (const m of existingMembers) {
+                  if (m.phone && m.phone !== 'desconhecido') {
+                    firstSeenMap.set(m.phone, m.firstSeenAt);
+                  }
+                }
+
                 await prisma.groupMember.deleteMany({
                   where: { groupId: group.id }
                 });
 
+                const syncNow = new Date();
+                const newPhonesSet = new Set();
                 const membersData = participants.map(p => {
                   const isAdmin = Boolean(p.IsAdmin || p.isAdmin || p.admin);
                   const isSuperAdmin = Boolean(p.IsSuperAdmin || p.isSuperAdmin);
+                  const phone = participantPhone(p) || 'desconhecido';
+                  if (phone !== 'desconhecido') newPhonesSet.add(phone);
                   return {
                     groupId: group.id,
-                    phone: participantPhone(p) || 'desconhecido',
+                    phone,
                     lid: participantLid(p) || null,
                     displayName: p.DisplayName || p.displayName || null,
                     isAdmin: isAdmin || isSuperAdmin,
                     isSuperAdmin,
-                    role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant'
+                    role: (isAdmin || isSuperAdmin) ? 'admin' : 'participant',
+                    firstSeenAt: firstSeenMap.get(phone) || syncNow
                   };
                 });
 
                 await prisma.groupMember.createMany({
                   data: membersData
                 });
+
+                let joined = 0;
+                let left = 0;
+                if (firstSeenMap.size > 0) {
+                  for (const phone of newPhonesSet) {
+                    if (!firstSeenMap.has(phone)) joined++;
+                  }
+                  for (const oldPhone of firstSeenMap.keys()) {
+                    if (!newPhonesSet.has(oldPhone)) left++;
+                  }
+                }
+
+                const hoje = ops.hojeSP();
+                await prisma.groupDailySnapshot.upsert({
+                  where: { groupId_date: { groupId: group.id, date: hoje } },
+                  update: {
+                    memberCount: membersData.length,
+                    ...(joined > 0 ? { joinedCount: { increment: joined } } : {}),
+                    ...(left > 0 ? { leftCount: { increment: left } } : {})
+                  },
+                  create: {
+                    groupId: group.id,
+                    date: hoje,
+                    memberCount: membersData.length,
+                    joinedCount: joined,
+                    leftCount: left
+                  }
+                }).catch(() => {});
               }
             }
           }
