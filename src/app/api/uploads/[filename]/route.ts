@@ -36,7 +36,7 @@ const MIME: Record<string, string> = {
 function caminhoDe(filename: string) {
   const safeName = basename(decodeURIComponent(filename));
   if (!safeName || safeName.startsWith('.')) return null;
-  return { safeName, filepath: join(process.cwd(), 'uploads', safeName) };
+  return { safeName, filepath: join(/*turbopackIgnore: true*/ process.cwd(), 'uploads', safeName) };
 }
 
 function cabecalhos(safeName: string, tamanho: number) {
