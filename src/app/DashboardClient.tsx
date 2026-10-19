@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import BulkEditModal from './BulkEditModal'
 import SeletorDeGrupos from '@/components/SeletorDeGrupos'
+import InserirVariavel from '@/components/InserirVariavel'
+import PainelAuditoriaMembros from '@/components/PainelAuditoriaMembros'
+import PainelAgendaCampanhas from '@/components/PainelAgendaCampanhas'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -14,12 +17,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff, ShieldCheck, CalendarClock } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
 import { cn } from '@/lib/utils'
-import { useRef } from 'react'
 
 const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
   const [offset, setOffset] = useState(value * 40);
@@ -155,12 +157,14 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [searchTermPaste, setSearchTermPaste] = useState('')
 
   // Mass Create State
+  const [visaoAtiva, setVisaoAtiva] = useState<'grupos' | 'agenda' | 'auditoria'>('grupos')
   const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
   const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
   const [isCreating, setIsCreating] = useState(false)
   const [searchTermCreate, setSearchTermCreate] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [campanhaMassa, setCampanhaMassa] = useState('')
   
   const getEmptySchedule = () => ({ 
     type: 'text', 
@@ -175,6 +179,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     buttonsList: [{ type: 'reply', displayText: 'Sim', id: 'btn1' }] as any[],
     pollName: '',
     pollOptions: 'Opção 1, Opção 2',
+    trackLinks: true,
+    mentionAll: false,
     scheduledAt: '' 
   })
   
@@ -431,6 +437,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const handleMassCreateClick = () => {
     setSelectedGroupsForCreate([])
     setNewSchedules([getEmptySchedule()])
+    setCampanhaMassa('')
     setIsMassCreateModalOpen(true)
   }
 
@@ -455,6 +462,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           buttonsList: item.content?.buttons && item.content.buttons.length > 0 ? item.content.buttons : [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
           pollName: item.content?.name || '',
           pollOptions: item.content?.values ? item.content.values.join(', ') : 'Opção 1, Opção 2',
+          trackLinks: item.content?.trackLinks !== false,
+          mentionAll: Boolean(item.content?.mentionAll),
           scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString().slice(0, 16) : ''
         }
       })
@@ -493,20 +502,23 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           let content: any = {}
           
           if (schedule.type === 'text') {
-            content = { text: schedule.text }
+            content = { text: schedule.text, trackLinks: Boolean(schedule.trackLinks), mentionAll: Boolean(schedule.mentionAll) }
           } else if (schedule.type === 'media') {
             content = { 
               mediatype: schedule.mediatype, 
               media: schedule.mediaUrl, 
               caption: schedule.caption,
-              fileName: schedule.fileName
+              fileName: schedule.fileName,
+              trackLinks: Boolean(schedule.trackLinks),
+              mentionAll: Boolean(schedule.mentionAll)
             }
           } else if (schedule.type === 'button') {
             content = {
               title: schedule.title,
               description: schedule.description,
               footer: schedule.footer,
-              buttons: schedule.buttonsList
+              buttons: schedule.buttonsList,
+              mentionAll: Boolean(schedule.mentionAll)
             }
             const hasCTA = schedule.buttonsList.some((b: any) => b.type !== 'reply')
             if (!hasCTA && schedule.mediaUrl) {
@@ -521,7 +533,8 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             content = {
               name: schedule.pollName,
               selectableCount: 1,
-              values: opts
+              values: opts,
+              mentionAll: Boolean(schedule.mentionAll)
             }
           }
 
@@ -529,6 +542,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             groupId: groupId,
             type: schedule.type,
             content,
+            campaign: campanhaMassa ? campanhaMassa.trim() : null,
             scheduledAt: new Date(schedule.scheduledAt).toISOString(),
             status: 'pending'
           }
@@ -681,7 +695,50 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
         </Card>
       </div>
 
+      {/* Seletor de Visão Principal */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
+        <Button
+          variant={visaoAtiva === 'grupos' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setVisaoAtiva('grupos')}
+          className="gap-1.5"
+        >
+          <Users className="w-4 h-4" /> Meus Grupos ({gruposDaInstancia.length})
+        </Button>
+        <Button
+          variant={visaoAtiva === 'agenda' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setVisaoAtiva('agenda')}
+          className="gap-1.5"
+        >
+          <CalendarClock className="w-4 h-4" /> Agenda &amp; Fila Global ({totalPending})
+        </Button>
+        <Button
+          variant={visaoAtiva === 'auditoria' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setVisaoAtiva('auditoria')}
+          className="gap-1.5"
+        >
+          <ShieldCheck className="w-4 h-4" /> Auditoria de Membros &amp; DDDs
+        </Button>
+      </div>
+
+      {visaoAtiva === 'agenda' && (
+        <PainelAgendaCampanhas
+          tags={tagsDoPainel}
+          instances={instances}
+          onChanged={() => window.location.reload()}
+        />
+      )}
+
+      {visaoAtiva === 'auditoria' && (
+        <PainelAuditoriaMembros
+          tagId={tagFiltro !== 'todas' && tagFiltro !== 'sem_tag' ? tagFiltro : undefined}
+        />
+      )}
+
       {/* Groups Section */}
+      {visaoAtiva === 'grupos' && (
       <div className="space-y-4">
         <div className="space-y-3">
           <div className="flex items-baseline justify-between gap-4">
@@ -889,16 +946,43 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center gap-4 text-xs font-medium text-muted-foreground bg-muted/30 p-2 rounded-md mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5" />
-                      {g._count.members}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <CalendarDays className="w-3.5 h-3.5" />
-                      {g._count.schedules}
-                    </div>
-                  </div>
+                  {(() => {
+                    const membros = g.participantCount || g._count?.members || 0
+                    const tagCap = g.tags?.[0]?.tag?.capacity || 950
+                    const pct = Math.min(100, Math.round((membros / tagCap) * 100))
+                    const vagas = Math.max(0, tagCap - membros)
+                    const barColor =
+                      pct >= 95
+                        ? 'bg-red-500'
+                        : pct >= 80
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                    return (
+                      <div className="space-y-1.5 bg-muted/30 p-2 rounded-md mb-2">
+                        <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <Users className="w-3.5 h-3.5" />
+                            <span>
+                              {membros}/{tagCap} ({pct}%)
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px]">{vagas} vagas</span>
+                            <span className="flex items-center gap-1">
+                              <CalendarDays className="w-3.5 h-3.5" />
+                              {g._count.schedules}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${barColor} transition-all`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })()}
                   
                   {/* Status Badges */}
                   <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold">
@@ -939,6 +1023,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           )}
         </div>
       </div>
+      )}
 
       {/* Mass Paste Dialog */}
       <Dialog open={isMassPasteModalOpen} onOpenChange={setIsMassPasteModalOpen}>
@@ -1005,6 +1090,15 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleMassCreateSubmit} className="space-y-4 pt-4">
+            <div className="space-y-1.5">
+              <Label>Nome da Campanha (Opcional — agrupa métricas e permite pausar/adiar em lote)</Label>
+              <Input
+                placeholder="Ex: Black Friday, Oferta Relâmpago, Aquecimento..."
+                value={campanhaMassa}
+                onChange={e => setCampanhaMassa(e.target.value)}
+              />
+            </div>
+
             {newSchedules.map((schedule, index) => (
               <div key={index} className="space-y-4 border border-border/60 p-4 rounded-xl bg-card relative mb-6">
                 {newSchedules.length > 1 && (
@@ -1027,12 +1121,50 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
                   </Select>
                 </div>
 
+                <InserirVariavel
+                  compact
+                  onInsert={token => {
+                    if (schedule.type === 'text') {
+                      updateSchedule(index, { text: (schedule.text || '') + token })
+                    } else if (schedule.type === 'media') {
+                      updateSchedule(index, { caption: (schedule.caption || '') + token })
+                    } else if (schedule.type === 'button') {
+                      updateSchedule(index, { description: (schedule.description || '') + token })
+                    } else if (schedule.type === 'poll') {
+                      updateSchedule(index, { pollName: (schedule.pollName || '') + token })
+                    }
+                  }}
+                />
+
                 {schedule.type === 'text' && (
                   <div className="space-y-2">
                     <Label>Mensagem</Label>
                     <Textarea required placeholder="Digite sua mensagem aqui..." value={schedule.text} onChange={e => updateSchedule(index, { text: e.target.value })} rows={5} className="resize-none" />
                   </div>
                 )}
+
+                <div className="flex flex-wrap gap-4 pt-1">
+                  {(schedule.type === 'text' || schedule.type === 'media') && (
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded border-gray-300 text-primary focus:ring-primary"
+                        checked={schedule.trackLinks !== false}
+                        onChange={e => updateSchedule(index, { trackLinks: e.target.checked })}
+                      />
+                      <span>Rastrear cliques nos links (/l/ + ?grupid=)</span>
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="rounded border-gray-300 text-primary focus:ring-primary"
+                      checked={Boolean(schedule.mentionAll)}
+                      onChange={e => updateSchedule(index, { mentionAll: e.target.checked })}
+                    />
+                    <span>Marcar todos do grupo (mentionAll)</span>
+                  </label>
+                </div>
 
                 {schedule.type === 'media' && (
                   <div 

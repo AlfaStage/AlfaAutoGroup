@@ -248,33 +248,101 @@ export default function RelatorioClient({ data }: { data: string }) {
               </CardContent>
             </Card>
 
-            {/* --------------------------------------------- crescimento */}
+            {/* --------------------------------------------- crescimento & churn real */}
             <Card className="border-border/40 bg-card/40">
               <CardHeader className="border-b border-border/40 pb-4">
                 <CardTitle className="text-base flex items-center gap-2">
-                  <UserPlus className="w-4 h-4" /> Movimento de membros
+                  <UserPlus className="w-4 h-4" /> Movimento Real de Membros (Entradas vs Saídas)
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4 space-y-2 max-h-[260px] overflow-y-auto">
                 {rel.crescimento.map((c: any) => (
-                  <div key={c.grupo} className="flex items-center justify-between text-sm gap-3">
+                  <div key={c.groupId || c.grupo} className="flex items-center justify-between text-sm gap-3">
                     <span className="truncate">{c.grupo}</span>
-                    <span className={`text-xs font-semibold whitespace-nowrap ${
-                      (c.novos || 0) > 0 ? 'text-green-500' : 'text-red-500'
-                    }`}>
-                      {(c.novos || 0) > 0 ? '+' : ''}{c.novos} <span className="text-muted-foreground font-normal">({c.agora})</span>
-                    </span>
+                    <div className="flex items-center gap-2 whitespace-nowrap text-xs">
+                      {c.entradas > 0 && (
+                        <span className="text-green-500 font-semibold">+{c.entradas}</span>
+                      )}
+                      {c.saidas > 0 && (
+                        <span className="text-red-500 font-semibold">-{c.saidas}</span>
+                      )}
+                      {!c.entradas && !c.saidas && c.novos !== null && (
+                        <span className={c.novos > 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
+                          {c.novos > 0 ? `+${c.novos}` : c.novos}
+                        </span>
+                      )}
+                      <span className="text-muted-foreground font-normal">({c.agora})</span>
+                    </div>
                   </div>
                 ))}
                 {rel.crescimento.length === 0 && (
                   <p className="text-sm text-muted-foreground">
-                    Sem variação registrada. A contagem compara com o dia anterior — leva
-                    um dia para começar a aparecer.
+                    Sem variação registrada nas sincronizações de hoje.
                   </p>
                 )}
               </CardContent>
             </Card>
           </div>
+
+          {/* --------------------------------------- Funil de Entrada por Tag (/g/) */}
+          {Array.isArray(rel.tags) && rel.tags.length > 0 && (
+            <Card className="border-border/40 bg-card/40">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle className="text-base">Funil de Entrada por Tag (/g/)</CardTitle>
+                <CardDescription>
+                  Compara quantas pessoas clicaram no link público da Tag vs quantas efetivamente entraram nos grupos hoje.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {rel.tags.map((t: any) => (
+                  <div key={t.id} className="p-3 rounded-xl border border-border/50 bg-muted/15 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm flex items-center gap-1.5">
+                        {t.cor && <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: t.cor }} />}
+                        {t.nome}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {t.grupos} grupo(s) · {t.totalMembros} membros
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs pt-1">
+                      <span>Cliques em /g/: <strong>{t.cliquesConviteUnicos || 0}</strong> ún.</span>
+                      <span className="text-green-500">Entraram hoje: <strong>+{t.novosMembrosHoje || 0}</strong></span>
+                      {t.taxaConversao !== null && t.taxaConversao !== undefined && (
+                        <span className="text-primary font-semibold">Conv: {t.taxaConversao}%</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* --------------------------------------- Campanhas do Dia */}
+          {Array.isArray(rel.porCampanha) && rel.porCampanha.length > 0 && (
+            <Card className="border-border/40 bg-card/40">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle className="text-base">Disparos por Campanha</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-2">
+                {rel.porCampanha.map((c: any) => (
+                  <div key={c.campanha} className="flex items-center justify-between text-sm p-2 rounded-lg bg-muted/15">
+                    <div>
+                      <span className="font-medium">📣 {c.campanha}</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        ({c.grupos} grupos · {(c.membrosAlcancados || 0).toLocaleString('pt-BR')} membros)
+                      </span>
+                    </div>
+                    <div className="text-xs space-x-2">
+                      <span className="text-green-500 font-semibold">{c.enviados} enviados</span>
+                      {c.pendentes > 0 && <span className="text-primary">{c.pendentes} na fila</span>}
+                      {c.falhados > 0 && <span className="text-red-500">{c.falhados} falhas</span>}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {/* ----------------------------------------------------- links */}
           <Card className="border-border/40 bg-card/40">
@@ -282,18 +350,36 @@ export default function RelatorioClient({ data }: { data: string }) {
               <CardTitle className="text-base flex items-center gap-2">
                 <MousePointerClick className="w-4 h-4" /> Cliques em links
               </CardTitle>
-              <CardDescription>{rel.totais.cliques} clique(s) em {rel.totais.linksClicados} link(s)</CardDescription>
+              <CardDescription>
+                {rel.totais.cliques} clique(s) totais ({rel.totais.cliquesUnicos ?? rel.totais.cliques} únicos) em {rel.totais.linksClicados} link(s)
+              </CardDescription>
             </CardHeader>
-            <CardContent className="pt-4 space-y-2">
+            <CardContent className="pt-4 space-y-2.5">
               {rel.links.map((l: any) => (
-                <div key={l.code} className="flex items-center justify-between gap-3 text-sm">
-                  <div className="min-w-0">
-                    <p className="truncate">{l.label || l.url}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      /l/{l.code}{l.grupo ? ` · ${l.grupo}` : ''}
-                    </p>
+                <div key={l.code} className="p-2.5 rounded-lg border border-border/40 bg-muted/10 space-y-1.5">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{l.label || l.url}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        /l/{l.code}{l.grupo ? ` · ${l.grupo}` : ''}
+                      </p>
+                    </div>
+                    <div className="text-right whitespace-nowrap">
+                      <span className="text-primary font-bold">{l.cliques}</span>
+                      {l.cliquesUnicos !== undefined && (
+                        <span className="text-xs text-emerald-400 ml-1.5">({l.cliquesUnicos} ún.)</span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-primary font-bold whitespace-nowrap">{l.cliques}</span>
+                  {Array.isArray(l.porGrupo) && l.porGrupo.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {l.porGrupo.map((pg: any) => (
+                        <span key={pg.groupId} className="text-[11px] bg-background/60 border border-border/40 px-2 py-0.5 rounded text-muted-foreground">
+                          {pg.grupo}: <strong className="text-foreground">{pg.cliques}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
               {rel.links.length === 0 && (
