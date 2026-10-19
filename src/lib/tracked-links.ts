@@ -1,14 +1,11 @@
 import { randomBytes } from 'crypto'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/prisma'
 
 /**
  * Encurtador com contagem de cliques.
  *
- * O link publicado vira /l/{code}, que redireciona para o destino real e
- * registra o clique. A troca acontece na criacao do agendamento, para o
- * codigo ja existir quando a mensagem sair.
+ * O link publicado vira /l/{code}?grupid={groupId}, que redireciona para o
+ * destino real, registra o clique por grupo/tag e injeta UTMs automaticamente.
  */
 
 /** Codigo curto: 7 caracteres, sem ambiguidade visual. */
@@ -57,8 +54,9 @@ export async function criarLinkRastreado(opcoes: {
   })
 }
 
-export function urlCurta(baseUrl: string, code: string) {
-  return `${baseUrl.replace(/\/+$/, '')}/l/${code}`
+export function urlCurta(baseUrl: string, code: string, groupId?: string) {
+  const base = `${baseUrl.replace(/\/+$/, '')}/l/${code}`
+  return groupId ? `${base}?grupid=${encodeURIComponent(groupId)}` : base
 }
 
 /** Acha URLs soltas num texto. */
@@ -90,7 +88,7 @@ export async function rastrearLinksDoTexto(
     })
     links.push(link)
 
-    const curta = urlCurta(baseUrl, link.code)
+    const curta = urlCurta(baseUrl, link.code, contexto.groupId)
     saida = saida.split(url).join(curta)
   }
 
@@ -119,7 +117,7 @@ export async function rastrearLinksDosBotoes(
         groupId: contexto.groupId
       })
       links.push(link)
-      copia.url = urlCurta(baseUrl, link.code)
+      copia.url = urlCurta(baseUrl, link.code, contexto.groupId)
     }
 
     // `track` e instrucao nossa, nao vai para a Evolution.

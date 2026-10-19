@@ -1,14 +1,19 @@
 import { NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import { prisma } from '@/lib/prisma'
+import {
+  isPreviewBot,
+  registerAndCheckUnique,
+  horaAtualSP,
+  resolveGroupParam,
+  enrichDestinationUrlWithUtm
+} from '@shared/bot-filter'
 
 /**
- * Redireciona um link encurtado e registra o clique.
+ * Redireciona um link encurtado e registra o clique com atribuição por grupo/tag.
  *
- * Rota publica de propósito — quem clica no WhatsApp não tem sessão.
- * Não guardamos IP: user agent e referer bastam para a estatística e
- * evitam acumular dado pessoal de quem só clicou num link.
+ * Aceita ?grupid=<id|slug|jid> (ou ?groupid= / ?g=) para saber exatamente
+ * de qual grupo de WhatsApp veio o clique, filtra bots de preview (WhatsApp,
+ * Facebook, Telegram, HEAD) e injeta UTMs automáticas no URL de destino.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -19,16 +24,49 @@ export async function GET(request: Request, { params }: { params: Promise<{ code
     return NextResponse.json({ error: 'Link não encontrado' }, { status: 404 })
   }
 
-  // O registro não pode atrasar nem derrubar o redirecionamento.
-  prisma.linkClick
-    .create({
-      data: {
-        linkId: link.id,
-        userAgent: request.headers.get('user-agent')?.slice(0, 300) || null,
-        referer: request.headers.get('referer')?.slice(0, 300) || null
-      }
-    })
-    .catch(e => console.error('[l] falha ao registrar clique:', e))
+  const reqUrl = new URL(request.url)
+  const rawGroupParam =
+    reqUrl.searchParams.get('grupid') ||
+    reqUrl.searchParams.get('groupid') ||
+    reqUrl.searchParams.get('g') ||
+    link.groupId ||
+    null
 
-  return NextResponse.redirect(link.url, 302)
+  const groupMeta = rawGroupParam ? await resolveGroupParam(prisma, rawGroupParam) : null
+  const ua = request.headers.get('user-agent') || ''
+  const bot = isPreviewBot(ua, request.method)
+
+  if (!bot) {
+    const ipHint =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      request.headers.get('x-real-ip') ||
+      ''
+    const isUnique = registerAndCheckUnique(
+      `l:${link.id}:${groupMeta?.id || 'none'}:${ua.slice(0, 120)}:${ipHint}`
+    )
+    const hour = horaAtualSP()
+
+    prisma.linkClick
+      .create({
+        data: {
+          linkId: link.id,
+          groupId: groupMeta?.id || link.groupId || null,
+          isUnique,
+          hour,
+          userAgent: ua.slice(0, 300) || null,
+          referer: request.headers.get('referer')?.slice(0, 300) || null
+        }
+      })
+      .catch(e => console.error('[l] falha ao registrar clique:', e))
+  }
+
+  const tagMeta = groupMeta?.tags?.[0]?.tag || null
+  const destinationUrl = enrichDestinationUrlWithUtm(
+    link.url,
+    groupMeta,
+    tagMeta,
+    link.label || null
+  )
+  return NextResponse.redirect(destinationUrl, 302)
 }
+

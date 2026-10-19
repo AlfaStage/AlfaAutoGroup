@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     }
 
     // Suportar tanto array de agendamentos, objeto com { groupIds, schedules }, por tag, ou objeto simples
-    const items: Array<{ groupIds: string[]; type: string; content: any; scheduledAt: string }> = []
+    const items: Array<{ groupIds: string[]; type: string; content: any; scheduledAt: string; campaign?: string | null }> = []
 
     if (Array.isArray(rawData)) {
       for (const item of rawData) {
@@ -107,7 +107,13 @@ export async function POST(request: Request) {
           ...itemTag
         ]))
         if (gids.length > 0 && item.type && item.content && item.scheduledAt) {
-          items.push({ groupIds: gids, type: item.type, content: item.content, scheduledAt: item.scheduledAt })
+          items.push({
+            groupIds: gids,
+            type: item.type,
+            content: item.content,
+            scheduledAt: item.scheduledAt,
+            campaign: item.campaign || null
+          })
         }
       }
     } else if (rawData && Array.isArray(rawData.schedules) && rawData.schedules.length > 0) {
@@ -126,7 +132,13 @@ export async function POST(request: Request) {
           ...schTag
         ]))
         if (itemGids.length > 0 && sch.type && sch.content && sch.scheduledAt) {
-          items.push({ groupIds: itemGids, type: sch.type, content: sch.content, scheduledAt: sch.scheduledAt })
+          items.push({
+            groupIds: itemGids,
+            type: sch.type,
+            content: sch.content,
+            scheduledAt: sch.scheduledAt,
+            campaign: sch.campaign || rawData.campaign || null
+          })
         }
       }
     } else if (rawData) {
@@ -136,7 +148,13 @@ export async function POST(request: Request) {
         ...(rawData.groupId ? [rawData.groupId] : []),
         ...tagGlobal
       ]))
-      items.push({ groupIds: gids, type: rawData.type, content: rawData.content, scheduledAt: rawData.scheduledAt })
+      items.push({
+        groupIds: gids,
+        type: rawData.type,
+        content: rawData.content,
+        scheduledAt: rawData.scheduledAt,
+        campaign: rawData.campaign || null
+      })
     }
 
     if (items.length === 0) {
@@ -167,6 +185,7 @@ export async function POST(request: Request) {
     for (const item of items) {
       const acaoDeGrupo = isGroupActionType(item.type)
       const requestedTime = new Date(item.scheduledAt)
+      const campaignClean = item.campaign ? String(item.campaign).trim().slice(0, 80) : null
 
       for (const gid of item.groupIds) {
         let adjustedAt = new Date(requestedTime)
@@ -198,6 +217,7 @@ export async function POST(request: Request) {
             groupId: gid,
             type: item.type,
             content: JSON.stringify(rastreado.content),
+            campaign: campaignClean,
             scheduledAt: requestedTime,
             adjustedAt,
             status: 'pending'

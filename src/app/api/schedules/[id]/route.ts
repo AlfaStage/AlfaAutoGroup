@@ -95,6 +95,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     if (data.type) updateData.type = data.type
+    if (data.campaign !== undefined) {
+      updateData.campaign = data.campaign ? String(data.campaign).trim().slice(0, 80) : null
+    }
 
     if (data.status) {
       const permitidos = ['pending', 'deactivated', 'error', 'sent', 'skipped']

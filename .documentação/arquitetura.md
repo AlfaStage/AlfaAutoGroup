@@ -2,12 +2,16 @@
 
 ## Stack & Camadas
 - **Next.js 16 (App Router / Standalone)**: Interface web PWA, rotas de API REST, Swagger (/api-docs) e servidor MCP (/api/mcp).
-- **Prisma + SQLite (`prisma/dev.db`)**: Banco de dados relacional em arquivo local com snapshot e volume persistente `sqlite_data`.
+- **Prisma Singleton + SQLite WAL (`prisma/dev.db` / `prod.db`)**: Banco de dados relacional local configurado com `PRAGMA journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000` e `temp_store = MEMORY`, eliminando bloqueios (`SQLITE_BUSY`) entre `web` e `worker`.
+- **Módulos Compartilhados (`shared/`)**:
+  - `shared/bot-filter.js`: Filtro anti-bot (ignora pré-visualizações do WhatsApp/redes sociais), deduplicação de cliques em memória com TTL, atribuição de grupo via `?grupid=` e injeção automática de UTMs.
+  - `shared/variables.js`: Motor de interpolação de +35 variáveis dinâmicas em 5 categorias e Spintax (`{opção A|opção B}`) resolvido no momento exato do disparo.
+  - `shared/report.js`, `shared/capacity.js`, `shared/group-tasks.js`: Consolidação de relatórios com churn real (`joinedCount`/`leftCount`), funil `/g/`, transbordo automático de grupos lotados preservando `campaign` e tarefas de grupo.
 - **Worker Autônomo (`worker.js`)**: Processo Node.js em background executando a cada 10s:
-  - Disparo de mensagens e ações de grupo com jitter anti-ban (15-60s) e backoff (2m, 10m, 30m).
+  - Disparo de mensagens (com interpolação de variáveis dinâmicas, spintax e sufixo `?grupid=` em links `/l/`) e ações de grupo com jitter anti-ban (15-60s) e backoff (2m, 10m, 30m).
   - Alerta em tempo real de falhas no grupo de gestão do WhatsApp.
   - Relatório diário consolidado às 23:59 (fuso SP).
-  - Gestão de lotação de tags (a cada 5min) e snapshots de membros diários.
+  - Gestão de lotação de tags (a cada 5min) e snapshots de membros diários com cálculo exato de entradas e saídas (`firstSeenAt`).
 - **Evolution GO (`evoapicloud/evolution-go:latest`)**: Engine Go de alta performance para conexão com o WhatsApp.
 - **Postgres 16 Alpine**: Banco exclusivo da Evolution GO (`evogo_auth` e `evogo_users`), garantindo persistência de sessão sem precisar reler QR Code.
 - **Caddy 2 Alpine**: Proxy reverso com emissão automática de SSL (Let's Encrypt), HTTP/2 e limite de corpo de requisição em 64MB.

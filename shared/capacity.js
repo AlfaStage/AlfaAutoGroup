@@ -293,6 +293,7 @@ async function criarProximoGrupo(prisma, tag, grupos) {
           groupId: novo.id,
           type: s.type,
           content: s.content,
+          campaign: s.campaign || null,
           scheduledAt: s.scheduledAt,
           adjustedAt: s.adjustedAt,
           status: 'pending'

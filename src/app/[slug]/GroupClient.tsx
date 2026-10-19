@@ -15,6 +15,7 @@ import { Calendar } from '@/components/ui/calendar'
 import { cn } from '@/lib/utils'
 import GroupEditorModal from './GroupEditorModal'
 import ScheduleSummary from './ScheduleSummary'
+import InserirVariavel from '@/components/InserirVariavel'
 import { PERMISSION_GROUPS, PERMISSION_LABEL, actionsToPermissions, validateButtons } from '@/lib/schedule-types'
 import { ArrowLeft, UserCircle2, Settings, MessageSquare, Lock, Unlock, ShieldCheck, UserPlus, Loader2, Megaphone, MousePointerClick, Tag as TagIcon, CalendarDays, Upload, Eye, EyeOff, Edit, Trash2, Power, PowerOff, Image as ImageIcon, Edit3, Copy, ClipboardPaste, CheckCircle2, AlertCircle, Send } from 'lucide-react'
 
@@ -184,6 +185,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
     profileName: '',
     profileDescription: '',
     profilePicture: '',
+    campaign: '',
     scheduledAt: '' 
   })
   
@@ -248,6 +250,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
       pollName: '', pollOptions: 'Opção 1, Opção 2',
       mentionAll: false, trackLinks: false,
       permissions: {}, profileName: '', profileDescription: '', profilePicture: '',
+      campaign: '',
       scheduledAt: ''
     })
     setIsModalOpen(true)
@@ -281,6 +284,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
       profileName: schedule.type === 'profile' ? (content.name || '') : '',
       profileDescription: schedule.type === 'profile' ? (content.description ?? '') : '',
       profilePicture: schedule.type === 'profile' ? (content.picture || '') : '',
+      campaign: schedule.campaign || '',
       scheduledAt: localISOTime
     })
     setIsModalOpen(true)
@@ -351,6 +355,7 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
       groupId: initialGroup.id,
       type: newSchedule.type,
       content,
+      campaign: newSchedule.campaign ? newSchedule.campaign.trim() : null,
       scheduledAt: new Date(newSchedule.scheduledAt).toISOString(),
       ...(editingId ? { status: 'pending' } : {}) 
     }
@@ -1117,6 +1122,35 @@ export default function GroupClient({ initialGroup }: { initialGroup: any }) {
                   </div>
                   {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
                 </div>
+              </div>
+            )}
+
+            {['text', 'media', 'button', 'poll', 'profile'].includes(newSchedule.type) && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Nome da Campanha (Opcional — para métricas e filtro global)</Label>
+                  <Input
+                    placeholder="Ex: Black Friday, Oferta VIP, Lançamento..."
+                    value={newSchedule.campaign || ''}
+                    onChange={e => setNewSchedule({ ...newSchedule, campaign: e.target.value })}
+                  />
+                </div>
+                <InserirVariavel
+                  compact
+                  onInsert={token => {
+                    if (newSchedule.type === 'text') {
+                      setNewSchedule(prev => ({ ...prev, text: (prev.text || '') + token }))
+                    } else if (newSchedule.type === 'media') {
+                      setNewSchedule(prev => ({ ...prev, caption: (prev.caption || '') + token }))
+                    } else if (newSchedule.type === 'button') {
+                      setNewSchedule(prev => ({ ...prev, description: (prev.description || '') + token }))
+                    } else if (newSchedule.type === 'poll') {
+                      setNewSchedule(prev => ({ ...prev, pollName: (prev.pollName || '') + token }))
+                    } else if (newSchedule.type === 'profile') {
+                      setNewSchedule(prev => ({ ...prev, profileDescription: (prev.profileDescription || '') + token }))
+                    }
+                  }}
+                />
               </div>
             )}
 
