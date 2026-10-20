@@ -212,11 +212,51 @@ async function enqueueWelcomeForJoin(prisma, { groupId, phone, displayName = nul
 }
 
 /**
+ * Monta texto rico de fallback quando o WhatsApp rejeita InteractiveMessage (/send/button) no privado (erro 473).
+ */
+function formatButtonFallbackText(content) {
+  const partes = [];
+  if (content.title && String(content.title).trim()) {
+    partes.push(`*${String(content.title).trim()}*`);
+  }
+  if (content.description && String(content.description).trim()) {
+    partes.push(String(content.description).trim());
+  }
+  if (Array.isArray(content.buttons) && content.buttons.length > 0) {
+    const linhasBotoes = [];
+    for (const b of content.buttons) {
+      const tipo = String(b?.type || 'reply');
+      const label = String(b?.displayText || 'Acessar').trim();
+      if (tipo === 'url' && b?.url) {
+        linhasBotoes.push(`👉 *${label}:*\n${String(b.url).trim()}`);
+      } else if (tipo === 'copy' && b?.copyCode) {
+        linhasBotoes.push(`📋 *${label}:* ${String(b.copyCode).trim()}`);
+      } else if (tipo === 'call' && b?.phoneNumber) {
+        linhasBotoes.push(`📞 *${label}:* ${String(b.phoneNumber).trim()}`);
+      } else if (tipo === 'pix') {
+        const chave = String(b?.key || b?.copyCode || '').trim();
+        if (chave) linhasBotoes.push(`💠 *Pix (${label}):* ${chave}`);
+      } else if (label) {
+        linhasBotoes.push(`• *${label}*`);
+      }
+    }
+    if (linhasBotoes.length > 0) {
+      partes.push(linhasBotoes.join('\n\n'));
+    }
+  }
+  if (content.footer && String(content.footer).trim()) {
+    partes.push(`_${String(content.footer).trim()}_`);
+  }
+  return partes.join('\n\n');
+}
+
+/**
  * Monta e executa a requisicao HTTP de envio na Evolution GO para um destinatario (numero PV ou JID).
  */
 async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type, content, urlAbsolutaDeMidia) {
   let endpoint = '';
   let payload = {};
+  const resolveUrl = (u) => (typeof urlAbsolutaDeMidia === 'function' ? urlAbsolutaDeMidia(u) : u);
 
   if (type === 'text') {
     endpoint = '/send/text';
@@ -227,9 +267,7 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
     };
   } else if (type === 'media') {
     endpoint = '/send/media';
-    const mediaUrl = typeof urlAbsolutaDeMidia === 'function'
-      ? urlAbsolutaDeMidia(content.media)
-      : content.media;
+    const mediaUrl = resolveUrl(content.media);
     payload = {
       number: recipient,
       type: content.mediatype || 'image',
@@ -241,7 +279,6 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
   } else if (type === 'button') {
     endpoint = '/send/button';
     const hasCTA = Array.isArray(content.buttons) && content.buttons.some((b) => b.type !== 'reply');
-    const resolveUrl = (u) => (typeof urlAbsolutaDeMidia === 'function' ? urlAbsolutaDeMidia(u) : u);
     payload = {
       number: recipient,
       title: content.title || '',
@@ -276,6 +313,45 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
     });
 
     const respText = await res.text();
+
+    // Fallback inteligente no PV: se /send/button falhar (ex.: erro 473 do WhatsApp em chat 1-a-1),
+    // entrega automaticamente como midia + legenda formatada ou texto formatado com os links clicaveis.
+    if (!res.ok && type === 'button') {
+      const fallbackText = formatButtonFallbackText(content);
+      const mediaCandidate = content.imageUrl || content.videoUrl;
+      const fbEndpoint = mediaCandidate ? '/send/media' : '/send/text';
+      const fbPayload = mediaCandidate
+        ? {
+            number: recipient,
+            type: content.videoUrl ? 'video' : 'image',
+            caption: fallbackText,
+            url: resolveUrl(mediaCandidate),
+            filename: 'boas-vindas',
+            delay: 1200
+          }
+        : {
+            number: recipient,
+            text: fallbackText,
+            delay: 1200
+          };
+
+      const fbRes = await fetch(`${evolutionUrl}${fbEndpoint}`, {
+        method: 'POST',
+        headers: {
+          apikey: token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(fbPayload)
+      });
+      const fbRespText = await fbRes.text();
+      return {
+        ok: fbRes.ok,
+        status: fbRes.status,
+        body: fbRespText,
+        fallbackUsed: fbEndpoint
+      };
+    }
+
     return {
       ok: res.ok,
       status: res.status,
@@ -408,6 +484,7 @@ module.exports = {
   resolveActiveWelcomeRule,
   isPhoneProtectedFromWelcome,
   enqueueWelcomeForJoin,
+  formatButtonFallbackText,
   sendEvolutionWelcomeMessage,
   processWelcomeQueue
 };
