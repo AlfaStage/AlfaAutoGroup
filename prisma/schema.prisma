@@ -37,6 +37,8 @@ model Group {
   snapshots          GroupDailySnapshot[]
   schedules          Schedule[]
   messages           Message[]
+  welcomeRule        WelcomeRule?
+  welcomeDispatches  WelcomeDispatch[]
 
   @@unique([instanceName, evolutionGroupId])
 }
@@ -170,8 +172,9 @@ model Tag {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  groups GroupTag[]
-  clicks TagClick[]
+  groups      GroupTag[]
+  clicks      TagClick[]
+  welcomeRule WelcomeRule?
 }
 
 /// Clique registrado no link publico /g/{codigo} da tag (topo do funil de entrada).
@@ -232,4 +235,49 @@ model AlertLog {
   detail String?
 
   @@unique([kind, refId])
+}
+
+/// Regra de automacao de boas-vindas no privado (configurada por Grupo ou por Tag).
+model WelcomeRule {
+  id             String            @id @default(uuid())
+  groupId        String?           @unique
+  tagId          String?           @unique
+  enabled        Boolean           @default(false)
+  type           String            @default("text") // text | media | button | poll
+  content        String            // JSON identico ao Schedule.content
+  delayMinSec    Int               @default(45)
+  delayMaxSec    Int               @default(150)
+  cooldownDays   Int               @default(30)
+  senderInstance String?           // instancia remetente opcional (se vazio, usa a do grupo)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  group      Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tag        Tag?              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  dispatches WelcomeDispatch[]
+}
+
+/// Fila e historico de disparos de boas-vindas no privado (com escalonamento anti-ban).
+model WelcomeDispatch {
+  id           String      @id @default(uuid())
+  ruleId       String
+  groupId      String
+  tagId        String?
+  phone        String      // digitos limpos (ex.: 5511999999999) ou JID em modo de teste
+  displayName  String?
+  status       String      @default("pending") // pending | processing | sent | skipped | error
+  scheduledAt  DateTime
+  sentAt       DateTime?
+  attempts     Int         @default(0)
+  errorMessage String?
+  isTest       Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+
+  rule  WelcomeRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  group Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledAt])
+  @@index([phone, tagId])
+  @@index([phone, groupId])
+  @@index([ruleId])
 }

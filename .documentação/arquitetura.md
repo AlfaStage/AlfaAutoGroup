@@ -4,15 +4,16 @@
 - **Next.js 16 (App Router / Standalone)**: Interface web PWA, rotas de API REST, Swagger (/api-docs) e servidor MCP (/api/mcp).
 - **Prisma Singleton + SQLite WAL (`prisma/dev.db` / `prod.db`)**: Banco de dados relacional local configurado com `PRAGMA journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000` e `temp_store = MEMORY`, eliminando bloqueios (`SQLITE_BUSY`) entre `web` e `worker`.
 - **Módulos Compartilhados (`shared/`)**:
-  - `shared/bot-filter.js`: Filtro anti-bot (ignora pré-visualizações do WhatsApp/redes sociais), deduplicação de cliques em memória com TTL, atribuição de grupo via `?grupid=` e injeção automática de UTMs.
-  - `shared/variables.js`: Motor de interpolação de +35 variáveis dinâmicas em 5 categorias e Spintax (`{opção A|opção B}`) resolvido no momento exato do disparo.
+  - `shared/bot-filter.js`: Filtro anti-bot (ignora pré-visualizações do WhatsApp/redes sociais), deduplicação de cliques em memória com TTL, atribuição de grupo via `?grupid=` (código curto determinístico de 4 caracteres Base62) e injeção automática de UTMs.
+  - `shared/variables.js`: Motor de interpolação de +38 variáveis dinâmicas em 6 categorias (incluindo `{nome}`, `{primeiro_nome}`, `{nome_membro}` e `{telefone}`) e Spintax (`{opção A|opção B}`) resolvido no momento exato do disparo.
+  - `shared/welcome.js`: Motor de automação de Boas-Vindas no Privado (PV) ao entrar no grupo, suportando regras por Tag (com herança automática em transbordos) e por Grupo (precedência sobre Tag), 4 formatos (`text`, `media`, `button`, `poll`), proteção de equipe/admins/instâncias, cooldown por lead e fila anti-ban com espaçamento progressivo.
   - `shared/report.js`, `shared/capacity.js`, `shared/group-tasks.js`: Consolidação de relatórios com churn real (`joinedCount`/`leftCount`), funil `/g/`, transbordo automático de grupos lotados preservando `campaign` e tarefas de grupo.
 - **Worker Autônomo (`worker.js`)**: Processo Node.js em background executando a cada 10s:
-  - Disparo de mensagens (com interpolação de variáveis dinâmicas, spintax e sufixo `?grupid=` em links `/l/`) e ações de grupo com jitter anti-ban (15-60s) e backoff (2m, 10m, 30m).
+  - Disparo de mensagens de grupo e fila de boas-vindas no privado (`processWelcomeQueue`) com interpolação de variáveis dinâmicas, spintax, sufixo `?grupid=` em links `/l/`, jitter anti-ban e backoff (2m, 10m, 30m).
   - Alerta em tempo real de falhas no grupo de gestão do WhatsApp.
   - Relatório diário consolidado às 23:59 (fuso SP).
   - Gestão de lotação de tags (a cada 5min) e snapshots de membros diários com cálculo exato de entradas e saídas (`firstSeenAt`).
-- **Evolution GO (`evoapicloud/evolution-go:latest`)**: Engine Go de alta performance para conexão com o WhatsApp.
+- **Evolution GO (`evoapicloud/evolution-go:latest`)**: Engine Go de alta performance para conexão com o WhatsApp (eventos `MESSAGE` e `GROUP`).
 - **Postgres 16 Alpine**: Banco exclusivo da Evolution GO (`evogo_auth` e `evogo_users`), garantindo persistência de sessão sem precisar reler QR Code.
 - **Caddy 2 Alpine**: Proxy reverso com emissão automática de SSL (Let's Encrypt), HTTP/2 e limite de corpo de requisição em 64MB.
 
@@ -21,7 +22,7 @@
 - `postgres`: limite de 352MB (`shared_buffers=48MB`, `max_connections=120`, `idle_in_transaction_session_timeout=5min`, TCP keepalives ativos e healthcheck a cada 60s)
 - `evolution-go`: limite de 640MB
 - `web`: limite de 256MB (`NODE_OPTIONS="--max-old-space-size=224"`)
-- `worker`: limite de 192MB (`NODE_OPTIONS="--max-old-space-size=128"`), espaçamento de 1.5s entre tarefas de grupo e retry automático contra HTTP 429 (`rate-overlimit`)
+- `worker`: limite de 192MB (`NODE_OPTIONS="--max-old-space-size=128"`), espaçamento de 1.5s entre tarefas de grupo, máx. 2 disparos de boas-vindas por ciclo de 10s e retry automático contra HTTP 429 (`rate-overlimit`)
 - `watchdog-evolution.sh`: cron a cada 5min que expurga conexões ociosas órfãs (>2h) no Postgres preservando o pool ativo e reconecta instâncias desconectadas
 - `logging`: rotação automática JSON (`max-size=10m`, `max-file=3`) em todos os containers
 - `swapfile`: 6GB em disco com `vm.swappiness=10`

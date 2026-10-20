@@ -1,5 +1,5 @@
 /**
- * Motor de Variaveis Dinamicas e Spintax para mensagens, legendas, botoes e enquetes.
+ * Motor de Variaveis Dinamicas e Spintax para mensagens, legendas, botoes, enquetes e boas-vindas.
  *
  * Executado em memoria (< 1ms) no momento do disparo pelo worker.js.
  */
@@ -69,12 +69,21 @@ const CATALOGO_VARIAVEIS = [
     ]
   },
   {
+    categoria: 'Membro (Boas-Vindas no Privado)',
+    itens: [
+      { chave: '{nome}', exemplo: 'Maria Oliveira', descricao: 'Nome público do membro no WhatsApp (com fallback seguro)' },
+      { chave: '{nome_membro}', exemplo: 'Maria Oliveira', descricao: 'Sinônimo de {nome}' },
+      { chave: '{primeiro_nome}', exemplo: 'Maria', descricao: 'Primeiro nome do membro no WhatsApp' },
+      { chave: '{telefone}', exemplo: '5511999999999', descricao: 'Número de telefone do membro que entrou no grupo' }
+    ]
+  },
+  {
     categoria: 'Campanha & Anti-Ban (Spintax)',
     itens: [
       { chave: '{campanha}', exemplo: 'Black Friday Outubro', descricao: 'Nome da campanha definida no agendamento' },
       { chave: '{instancia}', exemplo: 'IceLaser-0800', descricao: 'Nome da instância conectada do grupo' },
       { chave: '{id_curto}', exemplo: 'A9F2', descricao: 'Código único de 4 caracteres gerado a cada envio (protocolo/anti-ban)' },
-      { chave: '{Olá|Oi|E aí}', exemplo: 'Olá', descricao: 'Spintax: sorteia automaticamente uma das opções separadas por | em cada grupo' }
+      { chave: '{Olá|Oi|E aí}', exemplo: 'Olá', descricao: 'Spintax: sorteia automaticamente uma das opções separadas por | em cada envio' }
     ]
   }
 ];
@@ -209,6 +218,11 @@ async function montarContextoGrupo(prisma, group, extras = {}) {
 
   const tempo = dadosDeTempoSP();
 
+  const nomeMembroRaw = String(extras.memberName || '').trim();
+  const nomeMembro = nomeMembroRaw || 'amigo(a)';
+  const primeiroNome = nomeMembroRaw ? nomeMembroRaw.split(/\s+/)[0] : 'amigo(a)';
+  const telefoneMembro = String(extras.memberPhone || '').trim();
+
   return {
     groupId: group?.id || '',
     grupo: nomeGrupo,
@@ -237,6 +251,10 @@ async function montarContextoGrupo(prisma, group, extras = {}) {
     total_membros_tag: String(totalMembrosTag),
     link_tag: linkTag,
     link_convite: linkTag || group?.inviteLink || '',
+    nome: nomeMembro,
+    nome_membro: nomeMembro,
+    primeiro_nome: primeiroNome,
+    telefone: telefoneMembro,
     campanha: extras.campaign || '',
     instancia: group?.instanceName || '',
     id_curto: randomBytes(2).toString('hex').toUpperCase(),

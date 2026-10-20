@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '@/lib/prisma'
+import { cleanPhoneDigits, sendEvolutionWelcomeMessage } from '@shared/welcome'
+import { montarContextoGrupo, resolverConteudoAgendamento } from '@shared/variables'
 import { validarChaveApi, chaveDoHeader } from '@/lib/api-keys'
 import { runGroupTask } from '@shared/group-tasks'
 import { aplicarRastreio } from '@/lib/tracked-links'
@@ -24,7 +26,7 @@ import {
 import { montarRelatorio, resumoTexto } from '@shared/report'
 import { hojeSP } from '@shared/ops'
 
-const prisma = new PrismaClient()
+// Usa singleton prisma de @/lib/prisma
 
 /**
  * Servidor MCP (Model Context Protocol) sobre HTTP.
@@ -963,7 +965,339 @@ const FERRAMENTAS: Ferramenta[] = [
 
       return texto(docsCompletos)
     }
+  },
+  // --------------------------------------------------- automacao de boas-vindas
+  {
+    name: 'welcome_list',
+    description:
+      'Lista todas as regras do Automatizador de Boas-Vindas (configuradas por Grupo ou por Tag), status (enabled), estatísticas de envios e últimos disparos da fila.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limitQueue: {
+          type: 'number',
+          description: 'Quantidade máxima de itens recentes da fila a retornar (padrão 30).'
+        }
+      }
+    },
+    async handler(args) {
+      const limit = Math.min(100, Math.max(1, Number(args.limitQueue || 30)))
+      const [regras, fila] = await Promise.all([
+        prisma.welcomeRule.findMany({
+          include: {
+            group: { select: { id: true, name: true, slug: true, instanceName: true } },
+            tag: { select: { id: true, name: true, slug: true, instanceName: true } },
+            _count: { select: { dispatches: true } }
+          },
+          orderBy: { updatedAt: 'desc' }
+        }),
+        prisma.welcomeDispatch.findMany({
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            group: { select: { id: true, name: true } }
+          }
+        })
+      ])
+      return texto({
+        totalRegras: regras.length,
+        regrasAtivas: regras.filter(r => r.enabled).length,
+        regras: regras.map(r => ({
+          id: r.id,
+          escopo: r.tagId ? 'tag' : 'group',
+          groupId: r.groupId,
+          grupoNome: r.group?.name || null,
+          tagId: r.tagId,
+          tagNome: r.tag?.name || null,
+          enabled: r.enabled,
+          type: r.type,
+          content: (() => {
+            try { return JSON.parse(r.content) } catch { return { text: r.content } }
+          })(),
+          delayMinSec: r.delayMinSec,
+          delayMaxSec: r.delayMaxSec,
+          cooldownDays: r.cooldownDays,
+          senderInstance: r.senderInstance,
+          totalDispatches: r._count.dispatches
+        })),
+        filaRecente: fila
+      })
+    }
+  },
+  {
+    name: 'welcome_upsert',
+    description:
+      'Cria ou atualiza uma regra de Boas-Vindas no Privado para um Grupo (groupId/slug) ou para uma Tag (tagId/tagSlug). Suporta os tipos text, media, button e poll, variáveis dinâmicas ({nome}, {primeiro_nome}, {grupo}, {tag}, {saudacao_emoji}), Spintax e rastreio de links.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupId: { type: 'string', description: 'ID ou slug do grupo (exclusivo com tagId)' },
+        tagId: { type: 'string', description: 'ID ou slug da Tag (exclusivo com groupId)' },
+        enabled: { type: 'boolean', description: 'Se a automação já inicia ativa (padrão false para permitir teste seguro antes)' },
+        type: { type: 'string', enum: ['text', 'media', 'button', 'poll'], description: 'Formato da mensagem de boas-vindas' },
+        content: { type: 'object', description: 'Conteúdo da mensagem (mesmo formato de schedule_create: text, media, button ou poll)' },
+        trackLinks: { type: 'boolean', description: 'Se true, converte URLs em links curtos rastreáveis /l/xxxxx?grupid=xxxx' },
+        delayMinSec: { type: 'number', description: 'Delay mínimo em segundos após entrar no grupo (padrão 45)' },
+        delayMaxSec: { type: 'number', description: 'Delay máximo em segundos após entrar no grupo (padrão 150)' },
+        cooldownDays: { type: 'number', description: 'Dias sem repetir boas-vindas para o mesmo número (padrão 30)' },
+        senderInstance: { type: 'string', description: 'Instância remetente opcional (se omitido, usa a instância do grupo)' }
+      },
+      required: ['type', 'content']
+    },
+    async handler(args) {
+      let resolvedGroupId: string | null = null
+      let resolvedTagId: string | null = null
+
+      if (args.groupId) {
+        const g = await prisma.group.findFirst({
+          where: { OR: [{ id: String(args.groupId) }, { slug: String(args.groupId) }] }
+        })
+        if (!g) return texto({ erro: `Grupo não encontrado: ${args.groupId}` })
+        resolvedGroupId = g.id
+      } else if (args.tagId) {
+        const t = await prisma.tag.findFirst({
+          where: { OR: [{ id: String(args.tagId) }, { slug: String(args.tagId) }, { name: String(args.tagId) }] }
+        })
+        if (!t) return texto({ erro: `Tag não encontrada: ${args.tagId}` })
+        resolvedTagId = t.id
+      } else {
+        return texto({ erro: 'Informe groupId OU tagId.' })
+      }
+
+      const type = String(args.type || 'text')
+      const rawContent = typeof args.content === 'string' ? JSON.parse(args.content) : { ...(args.content || {}) }
+      if (args.trackLinks !== undefined) rawContent.trackLinks = Boolean(args.trackLinks)
+
+      const problema = validateScheduleContent(type as any, rawContent)
+      if (problema) return texto({ erro: problema })
+
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
+      const rastreado = await aplicarRastreio(type, rawContent, baseUrl, resolvedGroupId || undefined)
+
+      const delayMinSec = Math.max(10, Math.min(3600, Number(args.delayMinSec ?? 45)))
+      const delayMaxSec = Math.max(delayMinSec, Math.min(7200, Number(args.delayMaxSec ?? 150)))
+      const cooldownDays = Math.max(1, Math.min(365, Number(args.cooldownDays ?? 30)))
+      const enabled = args.enabled !== undefined ? Boolean(args.enabled) : false
+      const senderInstance = args.senderInstance ? String(args.senderInstance).trim() : null
+
+      const dataPayload = {
+        type,
+        content: JSON.stringify(rastreado.content),
+        enabled,
+        delayMinSec,
+        delayMaxSec,
+        cooldownDays,
+        senderInstance
+      }
+
+      const rule = resolvedGroupId
+        ? await prisma.welcomeRule.upsert({
+            where: { groupId: resolvedGroupId },
+            update: dataPayload,
+            create: { groupId: resolvedGroupId, ...dataPayload }
+          })
+        : await prisma.welcomeRule.upsert({
+            where: { tagId: resolvedTagId! },
+            update: dataPayload,
+            create: { tagId: resolvedTagId!, ...dataPayload }
+          })
+
+      return texto({ ok: true, rule, linksCriados: rastreado.links.length })
+    }
+  },
+  {
+    name: 'welcome_toggle',
+    description: 'Ativa ou desativa (enabled: true/false) uma regra de Boas-Vindas por id, groupId ou tagId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ID da regra WelcomeRule' },
+        groupId: { type: 'string', description: 'ID ou slug do grupo' },
+        tagId: { type: 'string', description: 'ID ou slug da Tag' },
+        enabled: { type: 'boolean', description: 'true para ativar, false para desativar' }
+      },
+      required: ['enabled']
+    },
+    async handler(args) {
+      let rule = null
+      if (args.id) {
+        rule = await prisma.welcomeRule.findUnique({ where: { id: String(args.id) } })
+      } else if (args.groupId) {
+        const g = await prisma.group.findFirst({ where: { OR: [{ id: String(args.groupId) }, { slug: String(args.groupId) }] } })
+        if (g) rule = await prisma.welcomeRule.findUnique({ where: { groupId: g.id } })
+      } else if (args.tagId) {
+        const t = await prisma.tag.findFirst({ where: { OR: [{ id: String(args.tagId) }, { slug: String(args.tagId) }] } })
+        if (t) rule = await prisma.welcomeRule.findUnique({ where: { tagId: t.id } })
+      }
+      if (!rule) return texto({ erro: 'Regra de boas-vindas não encontrada.' })
+      const updated = await prisma.welcomeRule.update({
+        where: { id: rule.id },
+        data: { enabled: Boolean(args.enabled) }
+      })
+      return texto({ ok: true, rule: updated })
+    }
+  },
+  {
+    name: 'welcome_delete',
+    description: 'Remove uma regra de Boas-Vindas e limpa seus disparos na fila.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ID da regra WelcomeRule' },
+        groupId: { type: 'string', description: 'ID do grupo' },
+        tagId: { type: 'string', description: 'ID da Tag' }
+      }
+    },
+    async handler(args) {
+      const where = args.id
+        ? { id: String(args.id) }
+        : args.groupId
+          ? { groupId: String(args.groupId) }
+          : args.tagId
+            ? { tagId: String(args.tagId) }
+            : null
+      if (!where) return texto({ erro: 'Informe id, groupId ou tagId.' })
+      await prisma.welcomeRule.delete({ where })
+      return texto({ ok: true })
+    }
+  },
+  {
+    name: 'welcome_test',
+    description:
+      'Executa um disparo de TESTE SEGURO de uma regra de Boas-Vindas entre instâncias conectadas (targetInstanceName) ou para um número/grupo de teste (targetPhoneOrJid), sem ativar em grupos finais.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ruleId: { type: 'string', description: 'ID da regra WelcomeRule a testar' },
+        targetInstanceName: { type: 'string', description: 'Nome da instância conectada que receberá a mensagem de teste' },
+        targetPhoneOrJid: { type: 'string', description: 'Telefone ou JID de grupo de teste (grupos finais são bloqueados)' },
+        targetName: { type: 'string', description: 'Nome fictício do membro para interpolar {nome} / {primeiro_nome}' },
+        senderInstance: { type: 'string', description: 'Instância remetente opcional para o teste' }
+      },
+      required: ['ruleId']
+    },
+    async handler(args) {
+      const rule = await prisma.welcomeRule.findUnique({
+        where: { id: String(args.ruleId) },
+        include: {
+          group: true,
+          tag: {
+            include: {
+              groups: { orderBy: { position: 'asc' }, take: 1, include: { group: true } }
+            }
+          }
+        }
+      })
+      if (!rule) return texto({ erro: 'Regra não encontrada.' })
+
+      const apiUrl = process.env.EVOLUTION_API_URL || ''
+      const apiKey = process.env.EVOLUTION_API_KEY || ''
+      const resInst = await fetch(`${apiUrl}/instance/all`, { headers: { apikey: apiKey } })
+      const instBody = resInst.ok ? await resInst.json() : []
+      const instList = (Array.isArray(instBody) ? instBody : instBody.data || []).map((i: any) => ({
+        name: String(i.name || i.instance?.instanceName || ''),
+        token: String(i.token || ''),
+        phone: cleanPhoneDigits(i.jid || i.instance?.owner || '')
+      }))
+
+      let recipient = ''
+      let targetLabel = String(args.targetName || 'Teste Entre Instâncias')
+      if (args.targetInstanceName) {
+        const found = instList.find((i: any) => i.name === String(args.targetInstanceName).trim())
+        if (!found || !found.phone) return texto({ erro: `Instância de destino ${args.targetInstanceName} não encontrada.` })
+        recipient = found.phone
+        targetLabel = found.name
+      } else if (args.targetPhoneOrJid) {
+        const raw = String(args.targetPhoneOrJid).trim()
+        if (raw.endsWith('@g.us')) {
+          const tg = await prisma.group.findFirst({ where: { evolutionGroupId: raw } })
+          if (tg && !/teste|test/i.test(tg.name)) {
+            return texto({ erro: 'Bloqueio de segurança: não é permitido testar em grupos finais.' })
+          }
+          recipient = raw
+        } else {
+          recipient = cleanPhoneDigits(raw)
+        }
+      }
+      if (!recipient) return texto({ erro: 'Informe targetInstanceName ou targetPhoneOrJid válido.' })
+
+      const sampleGroup = rule.group || rule.tag?.groups?.[0]?.group || (await prisma.group.findFirst())
+      if (!sampleGroup) return texto({ erro: 'Nenhum grupo cadastrado para contexto.' })
+
+      const senderName = args.senderInstance || rule.senderInstance || sampleGroup.instanceName || instList[0]?.name
+      const senderInst = instList.find((i: any) => i.name === senderName) || instList[0]
+      if (!senderInst?.token) return texto({ erro: 'Sem instância remetente conectada.' })
+
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
+      const rawContent = JSON.parse(rule.content || '{}')
+      const ctx = await montarContextoGrupo(prisma, sampleGroup, {
+        baseUrl,
+        tag: rule.tag || undefined,
+        campaign: 'boas-vindas-teste',
+        memberName: targetLabel,
+        memberPhone: cleanPhoneDigits(recipient) || recipient
+      })
+      const resolvedContent = resolverConteudoAgendamento(rule.type, rawContent, ctx)
+
+      const sendRes = await sendEvolutionWelcomeMessage(
+        apiUrl,
+        senderInst.token,
+        recipient,
+        rule.type,
+        resolvedContent,
+        (u: string) => (u && !/^https?:\/\//i.test(u) && baseUrl ? `${baseUrl}${u.startsWith('/') ? '' : '/'}${u}` : u)
+      )
+
+      const dispatch = await prisma.welcomeDispatch.create({
+        data: {
+          ruleId: rule.id,
+          groupId: sampleGroup.id,
+          tagId: rule.tagId || null,
+          phone: recipient,
+          displayName: `[TESTE] ${targetLabel}`,
+          status: sendRes.ok ? 'sent' : 'error',
+          scheduledAt: new Date(),
+          sentAt: sendRes.ok ? new Date() : null,
+          attempts: 1,
+          errorMessage: sendRes.ok ? null : `HTTP ${sendRes.status}`,
+          isTest: true
+        }
+      })
+
+      return texto({ ok: sendRes.ok, senderInstance: senderInst.name, recipient, resolvedContent, dispatch })
+    }
+  },
+  {
+    name: 'welcome_queue_control',
+    description: 'Controla a fila de disparos de Boas-Vindas (cancel_pending ou retry_errors).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        subAction: { type: 'string', enum: ['cancel_pending', 'retry_errors'], description: 'Ação na fila' },
+        ruleId: { type: 'string', description: 'Filtrar opcionalmente por ruleId' }
+      },
+      required: ['subAction']
+    },
+    async handler(args) {
+      const ruleId = args.ruleId ? String(args.ruleId) : undefined
+      if (args.subAction === 'cancel_pending') {
+        const r = await prisma.welcomeDispatch.updateMany({
+          where: { status: 'pending', ...(ruleId ? { ruleId } : {}) },
+          data: { status: 'skipped', errorMessage: 'Cancelado via MCP' }
+        })
+        return texto({ ok: true, afetados: r.count })
+      }
+      if (args.subAction === 'retry_errors') {
+        const r = await prisma.welcomeDispatch.updateMany({
+          where: { status: 'error', ...(ruleId ? { ruleId } : {}) },
+          data: { status: 'pending', attempts: 0, errorMessage: null, scheduledAt: new Date(Date.now() + 20000) }
+        })
+        return texto({ ok: true, afetados: r.count })
+      }
+      return texto({ erro: 'subAction inválida' })
+    }
   }
+// fim de FERRAMENTAS
 ]
 
 // -------------------------------------------------------------- JSON-RPC

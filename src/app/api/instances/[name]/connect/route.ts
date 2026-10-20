@@ -84,7 +84,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ name
       await fetch(`${apiUrl}/instance/connect`, {
         method: 'POST',
         headers: { apikey: token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ immediate: true })
+        body: JSON.stringify({ immediate: true, subscribe: ['MESSAGE', 'GROUP'] })
       })
 
       await new Promise(resolve => setTimeout(resolve, 1500))
