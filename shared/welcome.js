@@ -309,18 +309,46 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
       delay: 1200
     };
   } else if (type === 'button') {
-    endpoint = '/send/button';
-    const hasCTA = Array.isArray(content.buttons) && content.buttons.some((b) => b.type !== 'reply');
-    payload = {
-      number: recipient,
-      title: content.title || '',
-      description: content.description || '',
-      footer: content.footer || '',
-      buttons: content.buttons || [],
-      ...(!hasCTA && content.imageUrl ? { imageUrl: resolveUrl(content.imageUrl) } : {}),
-      ...(!hasCTA && content.videoUrl ? { videoUrl: resolveUrl(content.videoUrl) } : {}),
-      delay: 1200
-    };
+    const isGroupTarget = String(recipient || '').trim().endsWith('@g.us');
+    if (isGroupTarget) {
+      endpoint = '/send/button';
+      const hasCTA = Array.isArray(content.buttons) && content.buttons.some((b) => b.type !== 'reply');
+      payload = {
+        number: recipient,
+        title: content.title || '',
+        description: content.description || '',
+        footer: content.footer || '',
+        buttons: content.buttons || [],
+        ...(!hasCTA && content.imageUrl ? { imageUrl: resolveUrl(content.imageUrl) } : {}),
+        ...(!hasCTA && content.videoUrl ? { videoUrl: resolveUrl(content.videoUrl) } : {}),
+        delay: 1200
+      };
+    } else {
+      // No chat privado 1-a-1 (@s.whatsapp.net), o WhatsApp bloqueia InteractiveMessage/NativeFlow
+      // em conexoes QR Code (erro 473 no servidor ou "Nao foi possivel carregar a mensagem" no app/PC).
+      // Por isso, no PV convertemos diretamente em card formatado com CTA clicavel (ou midia + legenda).
+      const formattedText = formatButtonFallbackText(content);
+      const mediaCandidate = content.imageUrl || content.videoUrl;
+      if (mediaCandidate) {
+        endpoint = '/send/media';
+        payload = {
+          number: recipient,
+          type: content.videoUrl ? 'video' : 'image',
+          caption: formattedText,
+          url: resolveUrl(mediaCandidate),
+          filename: 'boas-vindas',
+          delay: 1200
+        };
+      } else {
+        endpoint = '/send/text';
+        payload = {
+          number: recipient,
+          text: formattedText,
+          linkPreview: true,
+          delay: 1200
+        };
+      }
+    }
   } else if (type === 'poll') {
     endpoint = '/send/poll';
     payload = {
