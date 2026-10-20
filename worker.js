@@ -4,6 +4,7 @@ const ops = require('./shared/ops');
 const capacidade = require('./shared/capacity');
 const relatorio = require('./shared/report');
 const variaveis = require('./shared/variables');
+const welcome = require('./shared/welcome');
 const prisma = new PrismaClient();
 
 // Configura SQLite WAL para leitura concorrente sem bloqueios com o processo web
@@ -158,7 +159,14 @@ async function processSchedules() {
       }
     });
 
-    if (pendingSchedules.length === 0) return;
+    const pendingWelcomesCount = await prisma.welcomeDispatch.count({
+      where: {
+        status: 'pending',
+        scheduledAt: { lte: now }
+      }
+    }).catch(() => 0);
+
+    if (pendingSchedules.length === 0 && pendingWelcomesCount === 0) return;
 
     // Fetch instances to get tokens
     let instanceTokens = {};
@@ -338,6 +346,10 @@ async function processSchedules() {
           });
         }
       }
+    }
+    // 3. Processa fila de boas-vindas no privado (ate 2 envios por ciclo com espacamento anti-ban)
+    if (pendingWelcomesCount > 0) {
+      await welcome.processWelcomeQueue(prisma, instanceTokens, EVOLUTION_API_URL, urlAbsolutaDeMidia);
     }
   } catch (error) {
     console.error('[Worker] Erro ao processar agendamentos:', error);

@@ -1,0 +1,607 @@
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { isAuthenticated } from '@/lib/auth'
+import { validateScheduleContent } from '@/lib/schedule-types'
+import { aplicarRastreio } from '@/lib/tracked-links'
+import {
+  cleanPhoneDigits,
+  sendEvolutionWelcomeMessage
+} from '@shared/welcome'
+import {
+  montarContextoGrupo,
+  resolverConteudoAgendamento
+} from '@shared/variables'
+
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || ''
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || ''
+
+function baseUrlDoPedido(request: Request) {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    request.headers.get('origin') ||
+    new URL(request.url).origin
+  ).replace(/\/+$/, '')
+}
+
+function urlAbsolutaDeMidia(valor: string, baseUrl: string) {
+  const v = String(valor || '')
+  if (!v || /^https?:\/\//i.test(v) || v.startsWith('data:')) return v
+  if (!baseUrl) return v
+  return v.startsWith('/') ? `${baseUrl}${v}` : `${baseUrl}/${v}`
+}
+
+async function listarInstanciasEvolution(): Promise<
+  Array<{
+    name: string
+    token: string
+    jid: string
+    phone: string
+    connected: boolean
+  }>
+> {
+  if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) return []
+  try {
+    const res = await fetch(`${EVOLUTION_API_URL}/instance/all`, {
+      headers: { apikey: EVOLUTION_API_KEY },
+      cache: 'no-store'
+    })
+    if (!res.ok) return []
+    const body = await res.json()
+    const list = Array.isArray(body) ? body : body.data || []
+    return list
+      .map((inst: any) => {
+        const name = String(inst.name || inst.instance?.instanceName || '').trim()
+        const token = String(inst.token || '').trim()
+        const jid = String(inst.jid || inst.instance?.owner || '').trim()
+        const phone = cleanPhoneDigits(jid)
+        const connected = Boolean(inst.connected ?? inst.instance?.state === 'open')
+        return { name, token, jid, phone, connected }
+      })
+      .filter((i: any) => Boolean(i.name))
+  } catch {
+    return []
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    if (!(await isAuthenticated(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const startOfToday = new Date()
+    startOfToday.setHours(0, 0, 0, 0)
+
+    const [rules, dispatches, sentTodayCount, instances] = await Promise.all([
+      prisma.welcomeRule.findMany({
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              instanceName: true,
+              participantCount: true
+            }
+          },
+          tag: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              color: true,
+              instanceName: true
+            }
+          },
+          _count: {
+            select: { dispatches: true }
+          }
+        },
+        orderBy: { updatedAt: 'desc' }
+      }),
+      prisma.welcomeDispatch.findMany({
+        take: 100,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          group: {
+            select: { id: true, name: true, slug: true, instanceName: true }
+          },
+          rule: {
+            select: { id: true, type: true, groupId: true, tagId: true, senderInstance: true }
+          }
+        }
+      }),
+      prisma.welcomeDispatch.count({
+        where: {
+          status: 'sent',
+          sentAt: { gte: startOfToday }
+        }
+      }),
+      listarInstanciasEvolution()
+    ])
+
+    // Agrega contagens por status de cada regra
+    const countsByRule = await prisma.welcomeDispatch.groupBy({
+      by: ['ruleId', 'status'],
+      _count: { _all: true }
+    })
+
+    const statMap = new Map<
+      string,
+      { pending: number; sent: number; error: number; skipped: number }
+    >()
+    for (const row of countsByRule) {
+      const cur = statMap.get(row.ruleId) || { pending: 0, sent: 0, error: 0, skipped: 0 }
+      if (row.status === 'pending' || row.status === 'processing') cur.pending += row._count._all
+      else if (row.status === 'sent') cur.sent += row._count._all
+      else if (row.status === 'error') cur.error += row._count._all
+      else if (row.status === 'skipped') cur.skipped += row._count._all
+      statMap.set(row.ruleId, cur)
+    }
+
+    let pendentesFila = 0
+    let enviadosTotal = 0
+    let errosTotal = 0
+
+    const regrasFormatadas = rules.map(r => {
+      const st = statMap.get(r.id) || { pending: 0, sent: 0, error: 0, skipped: 0 }
+      pendentesFila += st.pending
+      enviadosTotal += st.sent
+      errosTotal += st.error
+
+      let parsedContent: any = {}
+      try {
+        parsedContent = JSON.parse(r.content || '{}')
+      } catch {
+        parsedContent = { text: r.content }
+      }
+
+      return {
+        id: r.id,
+        escopo: r.tagId ? 'tag' : 'group',
+        groupId: r.groupId,
+        tagId: r.tagId,
+        enabled: r.enabled,
+        type: r.type,
+        content: parsedContent,
+        delayMinSec: r.delayMinSec,
+        delayMaxSec: r.delayMaxSec,
+        cooldownDays: r.cooldownDays,
+        senderInstance: r.senderInstance,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        grupo: r.group,
+        tag: r.tag,
+        stats: st
+      }
+    })
+
+    const filaFormatada = dispatches.map(d => ({
+      id: d.id,
+      ruleId: d.ruleId,
+      groupId: d.groupId,
+      grupoNome: d.group?.name || 'Grupo',
+      instancia: d.rule?.senderInstance || d.group?.instanceName || '',
+      tagId: d.tagId,
+      phone: d.phone,
+      displayName: d.displayName,
+      type: d.rule?.type || 'text',
+      status: d.status,
+      scheduledAt: d.scheduledAt,
+      sentAt: d.sentAt,
+      attempts: d.attempts,
+      errorMessage: d.errorMessage,
+      isTest: d.isTest,
+      createdAt: d.createdAt
+    }))
+
+    return NextResponse.json({
+      resumo: {
+        regrasAtivas: rules.filter(r => r.enabled).length,
+        regrasTotais: rules.length,
+        pendentesFila,
+        enviadosHoje: sentTodayCount,
+        enviadosTotal,
+        errosTotal
+      },
+      regras: regrasFormatadas,
+      fila: filaFormatada,
+      instancias: instances.map(i => ({
+        name: i.name,
+        phone: i.phone,
+        jid: i.jid,
+        connected: i.connected
+      }))
+    })
+  } catch (error) {
+    console.error('Erro em GET /api/welcome:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    if (!(await isAuthenticated(request))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const body = await request.json()
+    const action = String(body.action || 'upsert')
+    const baseUrl = baseUrlDoPedido(request)
+
+    // 1. Criar ou Atualizar Regra de Boas-Vindas (por Grupo ou por Tag)
+    if (action === 'upsert') {
+      let groupId: string | null = body.groupId ? String(body.groupId).trim() : null
+      let tagId: string | null = body.tagId ? String(body.tagId).trim() : null
+
+      if (!tagId && body.tagSlug) {
+        const t = await prisma.tag.findUnique({ where: { slug: String(body.tagSlug).trim() } })
+        if (t) tagId = t.id
+      }
+
+      if ((!groupId && !tagId) || (groupId && tagId)) {
+        return NextResponse.json(
+          { error: 'Informe exatamente um escopo: groupId OU tagId' },
+          { status: 400 }
+        )
+      }
+
+      const type = String(body.type || 'text')
+      if (!['text', 'media', 'button', 'poll'].includes(type)) {
+        return NextResponse.json(
+          { error: 'Tipo inválido. Use text, media, button ou poll.' },
+          { status: 400 }
+        )
+      }
+
+      const rawContent =
+        typeof body.content === 'string'
+          ? JSON.parse(body.content)
+          : { ...(body.content || {}) }
+
+      if (body.trackLinks !== undefined) {
+        rawContent.trackLinks = Boolean(body.trackLinks)
+      }
+
+      const problema = validateScheduleContent(type as any, rawContent)
+      if (problema) {
+        return NextResponse.json({ error: problema }, { status: 400 })
+      }
+
+      const rastreado = await aplicarRastreio(
+        type,
+        rawContent,
+        baseUrl,
+        groupId || undefined
+      )
+
+      const delayMinSec = Math.max(10, Math.min(3600, Number(body.delayMinSec ?? 45)))
+      const delayMaxSec = Math.max(delayMinSec, Math.min(7200, Number(body.delayMaxSec ?? 150)))
+      const cooldownDays = Math.max(1, Math.min(365, Number(body.cooldownDays ?? 30)))
+      const enabled = body.enabled !== undefined ? Boolean(body.enabled) : false
+      const senderInstance = body.senderInstance ? String(body.senderInstance).trim() : null
+
+      const dataPayload = {
+        type,
+        content: JSON.stringify(rastreado.content),
+        enabled,
+        delayMinSec,
+        delayMaxSec,
+        cooldownDays,
+        senderInstance: senderInstance || null
+      }
+
+      const rule = groupId
+        ? await prisma.welcomeRule.upsert({
+            where: { groupId },
+            update: dataPayload,
+            create: { groupId, ...dataPayload }
+          })
+        : await prisma.welcomeRule.upsert({
+            where: { tagId: tagId! },
+            update: dataPayload,
+            create: { tagId: tagId!, ...dataPayload }
+          })
+
+      return NextResponse.json({
+        ok: true,
+        rule,
+        linksCriados: rastreado.links.length
+      })
+    }
+
+    // 2. Ativar / Desativar Regra (Toggle)
+    if (action === 'toggle') {
+      const id = body.id || body.ruleId
+      const groupId = body.groupId
+      const tagId = body.tagId
+
+      const where = id
+        ? { id: String(id) }
+        : groupId
+          ? { groupId: String(groupId) }
+          : tagId
+            ? { tagId: String(tagId) }
+            : null
+
+      if (!where) {
+        return NextResponse.json(
+          { error: 'Informe id, groupId ou tagId para ativar/desativar' },
+          { status: 400 }
+        )
+      }
+
+      const existing = await prisma.welcomeRule.findUnique({ where })
+      if (!existing) {
+        return NextResponse.json({ error: 'Regra não encontrada' }, { status: 404 })
+      }
+
+      const nextEnabled =
+        body.enabled !== undefined ? Boolean(body.enabled) : !existing.enabled
+
+      const updated = await prisma.welcomeRule.update({
+        where: { id: existing.id },
+        data: { enabled: nextEnabled }
+      })
+
+      return NextResponse.json({ ok: true, rule: updated })
+    }
+
+    // 3. Excluir Regra
+    if (action === 'delete') {
+      const id = body.id || body.ruleId
+      const groupId = body.groupId
+      const tagId = body.tagId
+
+      const where = id
+        ? { id: String(id) }
+        : groupId
+          ? { groupId: String(groupId) }
+          : tagId
+            ? { tagId: String(tagId) }
+            : null
+
+      if (!where) {
+        return NextResponse.json(
+          { error: 'Informe id, groupId ou tagId para excluir' },
+          { status: 400 }
+        )
+      }
+
+      await prisma.welcomeRule.delete({ where })
+      return NextResponse.json({ ok: true })
+    }
+
+    // 4. Disparo de Teste Seguro (Entre Instancias ou Grupo de Teste)
+    if (action === 'test') {
+      const instances = await listarInstanciasEvolution()
+      const ruleId = body.ruleId || body.id
+
+      const rule = ruleId
+        ? await prisma.welcomeRule.findUnique({
+            where: { id: String(ruleId) },
+            include: {
+              group: true,
+              tag: {
+                include: {
+                  groups: {
+                    orderBy: { position: 'asc' },
+                    take: 1,
+                    include: { group: true }
+                  }
+                }
+              }
+            }
+          })
+        : null
+
+      if (!rule) {
+        return NextResponse.json(
+          { error: 'Regra de boas-vindas não encontrada para teste' },
+          { status: 404 }
+        )
+      }
+
+      // Resolve o destinatario do teste: pode ser targetInstanceName (envia para o numero da outra instancia)
+      // ou targetPhoneOrJid (numero ou grupo de teste).
+      let recipient = ''
+      let targetLabel = String(body.targetName || 'Teste Entre Instâncias').trim()
+
+      if (body.targetInstanceName) {
+        const targetInst = instances.find(i => i.name === String(body.targetInstanceName).trim())
+        if (!targetInst || !targetInst.phone) {
+          return NextResponse.json(
+            { error: `Instância de destino "${body.targetInstanceName}" não encontrada ou sem número conectado` },
+            { status: 400 }
+          )
+        }
+        recipient = targetInst.phone
+        targetLabel = targetInst.name
+      } else if (body.targetPhoneOrJid) {
+        const rawTarget = String(body.targetPhoneOrJid).trim()
+        if (rawTarget.endsWith('@g.us')) {
+          // Trava de seguranca: so permite testar em grupo se for explicitamente um grupo de teste
+          const targetGroup = await prisma.group.findFirst({
+            where: { evolutionGroupId: rawTarget }
+          })
+          if (targetGroup && !/teste|test/i.test(targetGroup.name)) {
+            return NextResponse.json(
+              {
+                error:
+                  'Bloqueio de segurança: não é permitido disparar testes em grupos finais de clientes. Use entre instâncias ou um grupo de teste.'
+              },
+              { status: 403 }
+            )
+          }
+          recipient = rawTarget
+        } else {
+          recipient = cleanPhoneDigits(rawTarget)
+        }
+      }
+
+      if (!recipient) {
+        return NextResponse.json(
+          { error: 'Informe targetInstanceName ou targetPhoneOrJid válido para o teste' },
+          { status: 400 }
+        )
+      }
+
+      const sampleGroup =
+        rule.group ||
+        rule.tag?.groups?.[0]?.group ||
+        (await prisma.group.findFirst({ orderBy: { name: 'asc' } }))
+
+      if (!sampleGroup) {
+        return NextResponse.json(
+          { error: 'Nenhum grupo cadastrado para montar o contexto do teste' },
+          { status: 400 }
+        )
+      }
+
+      const senderName =
+        body.senderInstance ||
+        rule.senderInstance ||
+        rule.tag?.instanceName ||
+        sampleGroup.instanceName ||
+        instances[0]?.name ||
+        ''
+
+      const senderInst = instances.find(i => i.name === senderName) || instances[0]
+      if (!senderInst || !senderInst.token) {
+        return NextResponse.json(
+          { error: `Sem instância remetente conectada (${senderName})` },
+          { status: 400 }
+        )
+      }
+
+      let rawContent: any = {}
+      try {
+        rawContent = JSON.parse(rule.content || '{}')
+      } catch {
+        rawContent = { text: rule.content }
+      }
+
+      const ctx = await montarContextoGrupo(prisma, sampleGroup, {
+        baseUrl,
+        tag: rule.tag || undefined,
+        campaign: 'boas-vindas-teste',
+        memberName: targetLabel,
+        memberPhone: cleanPhoneDigits(recipient) || recipient
+      })
+
+      const resolvedContent = resolverConteudoAgendamento(rule.type, rawContent, ctx)
+
+      const sendRes = await sendEvolutionWelcomeMessage(
+        EVOLUTION_API_URL,
+        senderInst.token,
+        recipient,
+        rule.type,
+        resolvedContent,
+        (u: string) => urlAbsolutaDeMidia(u, baseUrl)
+      )
+
+      const dispatchLog = await prisma.welcomeDispatch.create({
+        data: {
+          ruleId: rule.id,
+          groupId: sampleGroup.id,
+          tagId: rule.tagId || null,
+          phone: recipient,
+          displayName: `[TESTE] ${targetLabel}`,
+          status: sendRes.ok ? 'sent' : 'error',
+          scheduledAt: new Date(),
+          sentAt: sendRes.ok ? new Date() : null,
+          attempts: 1,
+          errorMessage: sendRes.ok
+            ? null
+            : `HTTP ${sendRes.status}: ${(sendRes.body || sendRes.error || '').slice(0, 200)}`,
+          isTest: true
+        }
+      })
+
+      if (!sendRes.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Falha no envio de teste (HTTP ${sendRes.status})`,
+            details: sendRes.body || sendRes.error,
+            dispatch: dispatchLog
+          },
+          { status: 502 }
+        )
+      }
+
+      return NextResponse.json({
+        ok: true,
+        senderInstance: senderInst.name,
+        recipient,
+        resolvedContent,
+        dispatch: dispatchLog
+      })
+    }
+
+    // 5. Controle da Fila de Boas-Vindas (Cancelar pendentes, Retentar erros, Limpar item)
+    if (action === 'queue_control') {
+      const subAction = String(body.subAction || '')
+      const ruleId = body.ruleId ? String(body.ruleId) : undefined
+      const dispatchId = body.dispatchId ? String(body.dispatchId) : undefined
+
+      if (subAction === 'cancel_pending') {
+        const res = await prisma.welcomeDispatch.updateMany({
+          where: {
+            status: 'pending',
+            ...(ruleId ? { ruleId } : {}),
+            ...(dispatchId ? { id: dispatchId } : {})
+          },
+          data: {
+            status: 'skipped',
+            errorMessage: 'Cancelado manualmente pelo painel/API'
+          }
+        })
+        return NextResponse.json({ ok: true, afetados: res.count })
+      }
+
+      if (subAction === 'retry_errors') {
+        const errored = await prisma.welcomeDispatch.findMany({
+          where: {
+            status: 'error',
+            ...(ruleId ? { ruleId } : {}),
+            ...(dispatchId ? { id: dispatchId } : {})
+          },
+          orderBy: { createdAt: 'asc' },
+          take: 50
+        })
+
+        let cursorMs = Date.now() + 15000
+        for (const item of errored) {
+          await prisma.welcomeDispatch.update({
+            where: { id: item.id },
+            data: {
+              status: 'pending',
+              attempts: 0,
+              errorMessage: null,
+              scheduledAt: new Date(cursorMs)
+            }
+          })
+          cursorMs += (25 + Math.floor(Math.random() * 20)) * 1000
+        }
+
+        return NextResponse.json({ ok: true, afetados: errored.length })
+      }
+
+      if (subAction === 'delete_item' && dispatchId) {
+        await prisma.welcomeDispatch.delete({ where: { id: dispatchId } })
+        return NextResponse.json({ ok: true, afetados: 1 })
+      }
+
+      return NextResponse.json({ error: 'subAction inválida' }, { status: 400 })
+    }
+
+    return NextResponse.json({ error: `Ação desconhecida: ${action}` }, { status: 400 })
+  } catch (error: any) {
+    console.error('Erro em POST /api/welcome:', error)
+    return NextResponse.json(
+      { error: error?.message || 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
