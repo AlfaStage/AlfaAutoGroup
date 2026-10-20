@@ -152,12 +152,18 @@ async function enqueueWelcomeForJoin(prisma, { groupId, phone, displayName = nul
     return { queued: false, reason: 'invalid_phone' };
   }
 
+  const nowLock = Date.now();
+  if (recentJoinLocks.size > 500) {
+    for (const [k, ts] of recentJoinLocks.entries()) {
+      if (nowLock - ts > 15000) recentJoinLocks.delete(k);
+    }
+  }
   const lockKey = `${groupId}:${digits}`;
   const lastLock = recentJoinLocks.get(lockKey) || 0;
-  if (Date.now() - lastLock < 15000) {
+  if (nowLock - lastLock < 15000) {
     return { queued: false, reason: 'concurrent_duplicate' };
   }
-  recentJoinLocks.set(lockKey, Date.now());
+  recentJoinLocks.set(lockKey, nowLock);
 
   const resolved = await resolveActiveWelcomeRule(prisma, groupId);
   if (!resolved || !resolved.rule) {
@@ -393,6 +399,64 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
 }
 
 /**
+ * Lista todas as instancias cadastradas na Evolution GO com status de conexao e telefone limpo.
+ */
+async function listarInstanciasEvolution(evolutionUrl, evolutionKey) {
+  const evoUrl = evolutionUrl || process.env.EVOLUTION_API_URL || '';
+  const evoKey = evolutionKey || process.env.EVOLUTION_API_KEY || '';
+  if (!evoUrl || !evoKey) return [];
+  try {
+    const res = await fetch(`${evoUrl}/instance/all`, {
+      headers: { apikey: evoKey },
+      cache: 'no-store'
+    });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const list = Array.isArray(body) ? body : body.data || [];
+    return list
+      .map((inst) => {
+        const name = String(inst.name || inst.instance?.instanceName || '').trim();
+        const token = String(inst.token || '').trim();
+        const jid = String(inst.jid || inst.instance?.owner || '').trim();
+        const phone = cleanPhoneDigits(jid);
+        const connected = Boolean(inst.connected ?? inst.instance?.state === 'open');
+        return { name, token, jid, phone, connected };
+      })
+      .filter((i) => Boolean(i.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Seleciona a melhor instancia remetente CONECTADA.
+ * - Se a instancia preferida (da regra ou do grupo) estiver conectada e nao for o proprio destinatario, usa ela.
+ * - Se a instancia preferida estiver desconectada (ex.: sem QR lido) ou for o proprio destinatario do teste,
+ *   faz fallback automatico para outra instancia conectada ativa.
+ */
+function selecionarInstanciaRemetenteConectada(instances, preferredName, recipientPhoneOrJid) {
+  const list = Array.isArray(instances) ? instances : [];
+  const connected = list.filter((i) => i.connected && i.token);
+  if (connected.length === 0) return null;
+
+  const recipientDigits = cleanPhoneDigits(recipientPhoneOrJid);
+  const notSelf = recipientDigits
+    ? connected.filter((i) => i.phone !== recipientDigits)
+    : connected;
+
+  if (preferredName) {
+    const prefNotSelf = notSelf.find((i) => i.name === preferredName);
+    if (prefNotSelf) return prefNotSelf;
+  }
+
+  if (notSelf.length > 0) {
+    return notSelf[0];
+  }
+
+  return connected.find((i) => i.name === preferredName) || connected[0];
+}
+
+/**
  * Processa ate 2 envios pendentes da fila de boas-vindas por ciclo do worker (10s).
  */
 async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbsolutaDeMidia) {
@@ -413,6 +477,8 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
   });
 
   if (pendingList.length === 0) return;
+
+  const instances = await listarInstanciasEvolution(evolutionUrl, process.env.EVOLUTION_API_KEY);
 
   for (let i = 0; i < pendingList.length; i++) {
     const item = pendingList[i];
@@ -457,8 +523,10 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
       data: { status: 'processing' }
     });
 
-    const senderInstance = item.rule?.senderInstance || item.group?.instanceName || '';
-    const token = instanceTokens ? instanceTokens[senderInstance] : null;
+    const preferredSender = item.rule?.senderInstance || item.group?.instanceName || '';
+    const chosenInst = selecionarInstanciaRemetenteConectada(instances, preferredSender, item.phone);
+    const senderInstance = chosenInst?.name || preferredSender;
+    const token = chosenInst?.token || (instanceTokens ? instanceTokens[preferredSender] : null);
 
     if (!senderInstance || !token) {
       await prisma.welcomeDispatch.update({
@@ -466,7 +534,7 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
         data: {
           status: 'error',
           attempts: item.attempts + 1,
-          errorMessage: `Sem token ativo para instancia remetente "${senderInstance || 'indefinida'}"`
+          errorMessage: `Sem instancia remetente conectada para enviar (preferida: "${preferredSender || 'indefinida'}")`
         }
       });
       continue;
@@ -506,7 +574,7 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
           errorMessage: null
         }
       });
-      console.log(`[Welcome] Boas-vindas enviado com sucesso para ${item.phone} (grupo: ${item.group?.name})`);
+      console.log(`[Welcome] Boas-vindas enviado com sucesso via ${senderInstance} para ${item.phone} (grupo: ${item.group?.name})`);
     } else {
       const nextAttempt = item.attempts + 1;
       const shouldRetry = nextAttempt < 2 && !item.isTest;
@@ -528,71 +596,60 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
   }
 }
 
-async function obterTokenInstancia(instanceName) {
-  const evoUrl = process.env.EVOLUTION_API_URL || '';
-  const evoKey = process.env.EVOLUTION_API_KEY || '';
-  if (!evoUrl || !evoKey || !instanceName) return null;
-  try {
-    const res = await fetch(`${evoUrl}/instance/all`, {
-      headers: { apikey: evoKey },
-      cache: 'no-store'
-    });
-    if (!res.ok) return null;
-    const body = await res.json();
-    const list = Array.isArray(body) ? body : body.data || [];
-    const found = list.find((i) => (i.name || i.instance?.instanceName) === instanceName);
-    if (!found?.token) return null;
-    return {
-      token: String(found.token),
-      phone: cleanPhoneDigits(found.jid || found.instance?.owner || '')
-    };
-  } catch {
-    return null;
-  }
-}
-
 async function resolverParticipantesDoGrupoNaEvolution(instanceName, groupJid) {
   const mapa = new Map();
   const evoUrl = process.env.EVOLUTION_API_URL || '';
-  const inst = await obterTokenInstancia(instanceName);
-  if (!inst?.token || !evoUrl) return mapa;
+  if (!evoUrl || !groupJid) return mapa;
 
-  try {
-    const res = await fetch(`${evoUrl}/group/info`, {
-      method: 'POST',
-      headers: {
-        apikey: inst.token,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ groupJid })
-    });
-    if (!res.ok) return mapa;
-    const body = await res.json();
-    const g = body?.data || body || {};
-    const participants = Array.isArray(g.Participants)
-      ? g.Participants
-      : Array.isArray(g.participants)
-        ? g.participants
-        : [];
+  const instances = await listarInstanciasEvolution();
+  const connectedCandidates = [
+    ...instances.filter((i) => i.connected && i.name === instanceName),
+    ...instances.filter((i) => i.connected && i.name !== instanceName)
+  ];
 
-    for (const p of participants) {
-      const phone = cleanPhoneDigits(p.PhoneNumber || p.phoneNumber || p.JID || p.id || '');
-      if (!phone || phone.length < 10) continue;
-      const displayName =
-        p.DisplayName || p.PushName || p.name || p.notify
-          ? String(p.DisplayName || p.PushName || p.name || p.notify).trim()
-          : null;
+  for (const inst of connectedCandidates) {
+    if (!inst?.token) continue;
+    try {
+      const res = await fetch(`${evoUrl}/group/info`, {
+        method: 'POST',
+        headers: {
+          apikey: inst.token,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ groupJid })
+      });
+      if (!res.ok) continue;
+      const body = await res.json();
+      const g = body?.data || body || {};
+      const participants = Array.isArray(g.Participants)
+        ? g.Participants
+        : Array.isArray(g.participants)
+          ? g.participants
+          : [];
 
-      const lidRaw = String(p.LID || p.lid || (String(p.JID || '').endsWith('@lid') ? p.JID : '') || '').trim();
-      if (lidRaw) {
-        const lidClean = lidRaw.replace(/@lid$/i, '');
-        mapa.set(lidClean, { phone, displayName });
-        mapa.set(`${lidClean}@lid`, { phone, displayName });
+      if (participants.length === 0) continue;
+
+      for (const p of participants) {
+        const phone = cleanPhoneDigits(p.PhoneNumber || p.phoneNumber || p.JID || p.id || '');
+        if (!phone || phone.length < 10) continue;
+        const displayName =
+          p.DisplayName || p.PushName || p.name || p.notify
+            ? String(p.DisplayName || p.PushName || p.name || p.notify).trim()
+            : null;
+
+        const lidRaw = String(p.LID || p.lid || (String(p.JID || '').endsWith('@lid') ? p.JID : '') || '').trim();
+        if (lidRaw) {
+          const lidClean = lidRaw.replace(/@lid$/i, '');
+          mapa.set(lidClean, { phone, displayName });
+          mapa.set(`${lidClean}@lid`, { phone, displayName });
+        }
+        mapa.set(phone, { phone, displayName });
       }
-      mapa.set(phone, { phone, displayName });
+
+      if (mapa.size > 0) break;
+    } catch {
+      /* tenta proxima instancia conectada */
     }
-  } catch {
-    /* falha silenciosa */
   }
 
   return mapa;
@@ -698,6 +755,7 @@ async function handleWebhookRequest(prisma, NextResponse, request) {
 
       if (group) {
         let evoMap = null;
+        let connectedInstancePhones = null;
         let addedCount = 0;
 
         for (const member of movInfo.joined) {
@@ -774,10 +832,16 @@ async function handleWebhookRequest(prisma, NextResponse, request) {
             }).catch(() => {});
           }
 
+          if (!connectedInstancePhones) {
+            const insts = await listarInstanciasEvolution();
+            connectedInstancePhones = insts.map((i) => i.phone).filter(Boolean);
+          }
+
           const eqResult = await enqueueWelcomeForJoin(prisma, {
             groupId: group.id,
             phone: resolvedPhone,
-            displayName: resolvedName || existing?.displayName || null
+            displayName: resolvedName || existing?.displayName || null,
+            connectedInstancePhones
           }).catch((err) => {
             console.error('[Webhook] Erro ao enfileirar boas-vindas:', err);
             return null;
@@ -878,6 +942,8 @@ module.exports = {
   enqueueWelcomeForJoin,
   formatButtonFallbackText,
   sendEvolutionWelcomeMessage,
+  listarInstanciasEvolution,
+  selecionarInstanciaRemetenteConectada,
   processWelcomeQueue,
   extrairMovimentacoesNoGrupo,
   handleWebhookRequest

@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { cleanPhoneDigits, sendEvolutionWelcomeMessage } from '@shared/welcome'
+import {
+  cleanPhoneDigits,
+  listarInstanciasEvolution,
+  selecionarInstanciaRemetenteConectada,
+  sendEvolutionWelcomeMessage
+} from '@shared/welcome'
 import { montarContextoGrupo, resolverConteudoAgendamento } from '@shared/variables'
 import { validarChaveApi, chaveDoHeader } from '@/lib/api-keys'
 import { runGroupTask } from '@shared/group-tasks'
@@ -1192,13 +1197,7 @@ const FERRAMENTAS: Ferramenta[] = [
 
       const apiUrl = process.env.EVOLUTION_API_URL || ''
       const apiKey = process.env.EVOLUTION_API_KEY || ''
-      const resInst = await fetch(`${apiUrl}/instance/all`, { headers: { apikey: apiKey } })
-      const instBody = resInst.ok ? await resInst.json() : []
-      const instList = (Array.isArray(instBody) ? instBody : instBody.data || []).map((i: any) => ({
-        name: String(i.name || i.instance?.instanceName || ''),
-        token: String(i.token || ''),
-        phone: cleanPhoneDigits(i.jid || i.instance?.owner || '')
-      }))
+      const instList = await listarInstanciasEvolution(apiUrl, apiKey)
 
       let recipient = ''
       let targetLabel = String(args.targetName || 'Teste Entre Instâncias')
@@ -1224,12 +1223,17 @@ const FERRAMENTAS: Ferramenta[] = [
       const sampleGroup = rule.group || rule.tag?.groups?.[0]?.group || (await prisma.group.findFirst())
       if (!sampleGroup) return texto({ erro: 'Nenhum grupo cadastrado para contexto.' })
 
-      const senderName = args.senderInstance || rule.senderInstance || sampleGroup.instanceName || instList[0]?.name
-      const senderInst = instList.find((i: any) => i.name === senderName) || instList[0]
+      const preferredSender = args.senderInstance || rule.senderInstance || sampleGroup.instanceName || ''
+      const senderInst = selecionarInstanciaRemetenteConectada(instList, preferredSender, recipient)
       if (!senderInst?.token) return texto({ erro: 'Sem instância remetente conectada.' })
 
       const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
-      const rawContent = JSON.parse(rule.content || '{}')
+      let rawContent: any = {}
+      try {
+        rawContent = JSON.parse(rule.content || '{}')
+      } catch {
+        rawContent = { text: String(rule.content || '') }
+      }
       const ctx = await montarContextoGrupo(prisma, sampleGroup, {
         baseUrl,
         tag: rule.tag || undefined,
