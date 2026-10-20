@@ -28,6 +28,16 @@ Documentação Swagger interativa disponível em `/api-docs`.
 - `GET /api/schedules/queue`: Retorna linha do tempo global, métricas por campanha (`campaign`), resumo da fila e catálogo de variáveis dinâmicas.
 - `POST /api/schedules/queue`: Controles de emergência em massa (`pause`, `resume` com espaçamento anti-ban, `delay` em minutos) filtrados por `tagId`, `instanceName`, `groupId` ou `campaign`.
 
+### Boas-Vindas no Privado (PV) & MCP
+- `GET /api/welcome`: Lista regras de boas-vindas (`rules` por Tag ou Grupo), fila recente de disparos (`queue`), estatísticas (`stats` por status e em 24h) e instâncias conectadas para laboratório de teste (`instances`).
+- `POST /api/welcome`:
+  - `action: "upsert"`: Cria ou atualiza regra por `tagId` ou `groupId` (`text`, `media`, `button`, `poll`, `delayMinSec`, `delayMaxSec`, `cooldownDays`, `trackLinks`, `enabled`).
+  - `action: "toggle"`: Ativa ou desativa regra imediatamente (`enabled: true | false`).
+  - `action: "delete"`: Remove regra e seus disparos pendentes.
+  - `action: "test"`: Enfileira disparo de teste seguro entre instâncias ou em grupos de teste (`isTest: true`), com bloqueio de segurança no backend impedindo uso de grupos finais de clientes.
+  - `action: "queue_control"`: Pausa, retoma (com espaçamento anti-ban de 35s) ou cancela disparos pendentes na fila de boas-vindas.
+- **Ferramentas MCP (`/api/mcp`)**: `welcome_list`, `welcome_upsert`, `welcome_toggle`, `welcome_delete`, `welcome_test`, `welcome_queue_control`.
+
 ### Auditoria de Membros, Proteção de Equipe & Mapa de DDDs
 - `GET /api/members/audit`: Detecta leads duplicados em múltiplos grupos (excluindo admins, donos de instância e whitelist da equipe), sinaliza possíveis membros de equipe sem admin (`>= 3` grupos) e gera o Mapa Regional de DDDs/UFs por tag.
 - `POST /api/members/audit`: Gerencia a Whitelist da Equipe (`whitelist_add`, `whitelist_remove`) e executa remoção cirúrgica de duplicados dos grupos antigos (`remove_duplicates`) com trava de segurança no backend.
@@ -59,4 +69,3 @@ Documentação Swagger interativa disponível em `/api-docs`.
 - `GET /api/tags`: Lista tags, grupos vinculados e regras de capacidade.
 - `POST /api/tags`: Cria uma tag com capacidade e padrão de nome (`{n}`).
 - `GET /g/[code]`: Redirecionador público inteligente para o grupo ativo com vagas da tag, registrando cliques reais (`TagClick`, com filtro anti-bot) para cálculo de taxa de conversão.
-
