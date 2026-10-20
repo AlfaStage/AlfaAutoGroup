@@ -63,18 +63,23 @@ export async function POST(request: Request) {
       }
     }
 
+    const webhookUrl = process.env.WEBHOOK_URL || 'http://web:3000/api/webhook'
     const payload: any = {
       instanceName: data.instanceName,
       name: data.instanceName,
       qrcode: true,
-      token: `${data.instanceName}_${Date.now()}`
+      token: `${data.instanceName}_${Date.now()}`,
+      webhook: webhookUrl,
+      webhookUrl,
+      events: ['ALL', 'MESSAGE', 'GROUP', 'GROUP_INFO'],
+      subscribe: ['ALL', 'MESSAGE', 'GROUP', 'GROUP_INFO']
     }
 
     if (proxySettings) {
       payload.proxy = proxySettings;
     }
 
-    console.log("Criando instância na Evolution API:", payload);
+    console.log("Criando instância na Evolution API:", { instanceName: payload.instanceName, webhookUrl });
 
     const res = await fetch(`${apiUrl}/instance/create`, {
       method: 'POST',

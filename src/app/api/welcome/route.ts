@@ -5,6 +5,8 @@ import { validateScheduleContent } from '@/lib/schedule-types'
 import { aplicarRastreio } from '@/lib/tracked-links'
 import {
   cleanPhoneDigits,
+  listarInstanciasEvolution,
+  selecionarInstanciaRemetenteConectada,
   sendEvolutionWelcomeMessage
 } from '@shared/welcome'
 import {
@@ -13,7 +15,6 @@ import {
 } from '@shared/variables'
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || ''
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || ''
 
 function baseUrlDoPedido(request: Request) {
   return (
@@ -28,39 +29,6 @@ function urlAbsolutaDeMidia(valor: string, baseUrl: string) {
   if (!v || /^https?:\/\//i.test(v) || v.startsWith('data:')) return v
   if (!baseUrl) return v
   return v.startsWith('/') ? `${baseUrl}${v}` : `${baseUrl}/${v}`
-}
-
-async function listarInstanciasEvolution(): Promise<
-  Array<{
-    name: string
-    token: string
-    jid: string
-    phone: string
-    connected: boolean
-  }>
-> {
-  if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) return []
-  try {
-    const res = await fetch(`${EVOLUTION_API_URL}/instance/all`, {
-      headers: { apikey: EVOLUTION_API_KEY },
-      cache: 'no-store'
-    })
-    if (!res.ok) return []
-    const body = await res.json()
-    const list = Array.isArray(body) ? body : body.data || []
-    return list
-      .map((inst: any) => {
-        const name = String(inst.name || inst.instance?.instanceName || '').trim()
-        const token = String(inst.token || '').trim()
-        const jid = String(inst.jid || inst.instance?.owner || '').trim()
-        const phone = cleanPhoneDigits(jid)
-        const connected = Boolean(inst.connected ?? inst.instance?.state === 'open')
-        return { name, token, jid, phone, connected }
-      })
-      .filter((i: any) => Boolean(i.name))
-  } catch {
-    return []
-  }
 }
 
 export async function GET(request: Request) {
@@ -206,7 +174,7 @@ export async function GET(request: Request) {
       },
       regras: regrasFormatadas,
       fila: filaFormatada,
-      instancias: instances.map(i => ({
+      instancias: instances.map((i: any) => ({
         name: i.name,
         phone: i.phone,
         jid: i.jid,
@@ -408,7 +376,7 @@ export async function POST(request: Request) {
       let targetLabel = String(body.targetName || 'Teste Entre Instâncias').trim()
 
       if (body.targetInstanceName) {
-        const targetInst = instances.find(i => i.name === String(body.targetInstanceName).trim())
+        const targetInst = instances.find((i: any) => i.name === String(body.targetInstanceName).trim())
         if (!targetInst || !targetInst.phone) {
           return NextResponse.json(
             { error: `Instância de destino "${body.targetInstanceName}" não encontrada ou sem número conectado` },
@@ -458,18 +426,23 @@ export async function POST(request: Request) {
         )
       }
 
-      const senderName =
+      const preferredSenderName =
         body.senderInstance ||
         rule.senderInstance ||
         rule.tag?.instanceName ||
         sampleGroup.instanceName ||
-        instances[0]?.name ||
         ''
 
-      const senderInst = instances.find(i => i.name === senderName) || instances[0]
+      const senderInst = selecionarInstanciaRemetenteConectada(
+        instances,
+        preferredSenderName,
+        recipient
+      )
       if (!senderInst || !senderInst.token) {
         return NextResponse.json(
-          { error: `Sem instância remetente conectada (${senderName})` },
+          {
+            error: `Nenhuma instância conectada disponível para enviar o teste (preferida: ${preferredSenderName || 'padrão'}). Verifique se ao menos uma instância está Conectada.`
+          },
           { status: 400 }
         )
       }

@@ -96,7 +96,11 @@ export function PainelBoasVindas({
         const json = await res.json()
         setDados(json)
         if (!instanciaDestinoTeste && json.instancias?.length > 0) {
-          setInstanciaDestinoTeste(json.instancias[0].name)
+          const pref =
+            json.instancias.find((i: any) => i.connected && i.name === 'AlfaStage') ||
+            json.instancias.find((i: any) => i.connected) ||
+            json.instancias[0]
+          setInstanciaDestinoTeste(pref.name)
         }
       }
     } catch (e) {
@@ -496,10 +500,12 @@ export function PainelBoasVindas({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="padrao">Mesma instância do grupo</SelectItem>
+                    <SelectItem value="padrao">Mesma instância do grupo (ou conectada ativa)</SelectItem>
                     {instancias.map((inst: any) => (
                       <SelectItem key={inst.name} value={inst.name}>
-                        {inst.name} {inst.phone ? `(${inst.phone})` : ''}
+                        {inst.connected ? '🟢' : '🔴'} {inst.name}{' '}
+                        {inst.phone ? `(${inst.phone})` : ''}{' '}
+                        {inst.connected ? '• Conectada' : '• Desconectada'}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -783,7 +789,8 @@ export function PainelBoasVindas({
                 <SelectContent>
                   {instancias.map((inst: any) => (
                     <SelectItem key={inst.name} value={inst.name}>
-                      {inst.name} ({inst.phone || 'conectada'})
+                      {inst.connected ? '🟢' : '🔴'} {inst.name} (
+                      {inst.phone || (inst.connected ? 'conectada' : 'desconectada')})
                     </SelectItem>
                   ))}
                 </SelectContent>

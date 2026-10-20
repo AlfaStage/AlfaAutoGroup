@@ -81,10 +81,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ name
 
     // Sem QR em cache: abre a conexão e tenta de novo.
     if (!qrcode) {
+      const webhookUrl = process.env.WEBHOOK_URL || 'http://web:3000/api/webhook'
       await fetch(`${apiUrl}/instance/connect`, {
         method: 'POST',
         headers: { apikey: token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ immediate: true, subscribe: ['MESSAGE', 'GROUP'] })
+        body: JSON.stringify({
+          webhookUrl,
+          immediate: true,
+          subscribe: ['ALL', 'MESSAGE', 'GROUP', 'GROUP_INFO']
+        })
       })
 
       await new Promise(resolve => setTimeout(resolve, 1500))

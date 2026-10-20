@@ -115,6 +115,7 @@ services:
       TZ: America/Sao_Paulo
     volumes:
       - evolution_data:/app/data
+      - ./evogo-server:/app/server:ro
 
   # Roda uma vez: prepara o SQLite e o usuario admin, depois sai.
   init:
