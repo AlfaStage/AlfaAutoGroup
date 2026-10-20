@@ -7,6 +7,7 @@ import SeletorDeGrupos from '@/components/SeletorDeGrupos'
 import InserirVariavel from '@/components/InserirVariavel'
 import PainelAuditoriaMembros from '@/components/PainelAuditoriaMembros'
 import PainelAgendaCampanhas from '@/components/PainelAgendaCampanhas'
+import { PainelBoasVindas } from '@/components/PainelBoasVindas'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger
@@ -17,7 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff, ShieldCheck, CalendarClock } from 'lucide-react'
+import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff, ShieldCheck, CalendarClock, Sparkles } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar } from '@/components/ui/calendar'
@@ -157,7 +158,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [searchTermPaste, setSearchTermPaste] = useState('')
 
   // Mass Create State
-  const [visaoAtiva, setVisaoAtiva] = useState<'grupos' | 'agenda' | 'auditoria'>('grupos')
+  const [visaoAtiva, setVisaoAtiva] = useState<'grupos' | 'agenda' | 'auditoria' | 'boas_vindas'>('grupos')
   const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
   const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
   const [isCreating, setIsCreating] = useState(false)
@@ -721,6 +722,14 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
         >
           <ShieldCheck className="w-4 h-4" /> Auditoria de Membros &amp; DDDs
         </Button>
+        <Button
+          variant={visaoAtiva === 'boas_vindas' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setVisaoAtiva('boas_vindas')}
+          className="gap-1.5"
+        >
+          <Sparkles className="w-4 h-4" /> Boas-Vindas (PV)
+        </Button>
       </div>
 
       {visaoAtiva === 'agenda' && (
@@ -729,6 +738,10 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
           instances={instances}
           onChanged={() => window.location.reload()}
         />
+      )}
+
+      {visaoAtiva === 'boas_vindas' && (
+        <PainelBoasVindas groups={groups} tags={tagsDoPainel} />
       )}
 
       {visaoAtiva === 'auditoria' && (

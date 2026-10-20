@@ -18,6 +18,16 @@ type CategoriaVariavel = {
 
 const CATEGORIAS: CategoriaVariavel[] = [
   {
+    id: 'membro',
+    nome: 'Membro (Boas-vindas PV)',
+    itens: [
+      { token: '{nome}', desc: 'Nome completo ou primeiro nome do membro', exemplo: 'Maria Silva' },
+      { token: '{primeiro_nome}', desc: 'Apenas o primeiro nome do membro', exemplo: 'Maria' },
+      { token: '{nome_membro}', desc: 'Alias do nome do novo membro', exemplo: 'Maria Silva' },
+      { token: '{telefone}', desc: 'Número do WhatsApp do membro', exemplo: '5511999998888' }
+    ]
+  },
+  {
     id: 'grupo',
     nome: 'Grupo',
     itens: [
@@ -25,6 +35,7 @@ const CATEGORIAS: CategoriaVariavel[] = [
       { token: '{grupo_base}', desc: 'Nome sem numeração', exemplo: 'VIP São Paulo' },
       { token: '{n}', desc: 'Número do grupo', exemplo: '3' },
       { token: '{nn}', desc: 'Número com zero', exemplo: '03' },
+      { token: '{id_grupo}', desc: 'Código curto (4 chars) do grupo', exemplo: '2xP9' },
       { token: '{link_grupo}', desc: 'Link de convite direto', exemplo: 'https://chat.whatsapp.com/...' }
     ]
   },
@@ -67,15 +78,15 @@ const CATEGORIAS: CategoriaVariavel[] = [
     id: 'anti_spam',
     nome: 'Spintax & Campanha',
     itens: [
-      { token: '{Olá|Oi|Fala pessoal}', desc: 'Sorteia 1 variação por grupo (anti-spam)', exemplo: 'Olá' },
+      { token: '{Olá|Oi|Fala pessoal}', desc: 'Sorteia 1 variação por disparo (anti-spam)', exemplo: 'Olá' },
       { token: '{🔥|🚀|⚡}', desc: 'Sorteia emoji por disparo', exemplo: '🔥' },
-      { token: '{campanha}', desc: 'Nome da campanha do agendamento', exemplo: 'Black Friday' },
+      { token: '{campanha}', desc: 'Nome da campanha ou regra', exemplo: 'Black Friday' },
       { token: '{id_curto}', desc: 'Código único anti-bloqueio (4 chars)', exemplo: 'A7F2' }
     ]
   }
 ]
 
-export default function InserirVariavel({
+export function InserirVariavel({
   onInsert,
   compact = false
 }: {
@@ -110,7 +121,7 @@ export default function InserirVariavel({
           <Sparkles className="w-3.5 h-3.5 text-primary flex-shrink-0" />
           <span>Variáveis Dinâmicas &amp; Spintax</span>
           <span className="text-[11px] text-muted-foreground font-normal hidden sm:inline">
-            — clique para inserir {'{grupo}'}, {'{vagas}'}, {'{saudacao}'}, {'{opção 1|opção 2}'}
+            — clique para inserir {'{primeiro_nome}'}, {'{grupo}'}, {'{vagas}'}, {'{saudacao}'}, {'{opção 1|opção 2}'}
           </span>
           <span className="ml-auto flex items-center gap-1 text-muted-foreground">
             {aberto ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -169,10 +180,12 @@ export default function InserirVariavel({
           </div>
 
           <p className="text-[11px] text-muted-foreground">
-            💡 <strong>Links rastreados:</strong> qualquer link <code>/l/codigo</code> enviado pelo agendador recebe automaticamente <code>?grupid=ID_DO_GRUPO</code> para medir os cliques de cada grupo separadamente.
+            💡 <strong>Links rastreados:</strong> qualquer link <code>/l/codigo</code> enviado pelo agendador ou boas-vindas recebe automaticamente <code>?grupid=ID_CURTO</code> (4 caracteres) para medir os cliques de cada grupo separadamente.
           </p>
         </div>
       )}
     </div>
   )
 }
+
+export default InserirVariavel
