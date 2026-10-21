@@ -55,4 +55,7 @@ Automatizar o envio de mensagens de boas-vindas no privado (PV) quando um novo m
 - **ISSUE-4 (Auditoria 3 Pilares, Deploy VPS & Teste Real Entre Instâncias)**: Executar auditoria dos 3 pilares (>9.0/10), deploy na VPS e validar o disparo real entre as instâncias `IceLaser-Franquiadas`, `AlfaStage` e `IceLaser-0800` sem tocar em nenhum grupo final.
 - **ISSUE-5 (v0.4.1 — Botões Interativos Nativos 1-a-1 & Fallback de Instância Remetente Conectada)**:
   - `selecionarInstanciaRemetenteConectada`: Quando a instância padrão da regra ou do grupo estiver desconectada (ex.: `IceLaser-0800` aguardando leitura de QR Code) ou coincidir com o próprio número de destino no teste, o motor seleciona automaticamente outra instância conectada ativa (`IceLaser-Franquiadas` ou `AlfaStage`).
-  - Patch binário `deploy/evogo-server` montado em `/app/server:ro` para corrigir erro `473`/`405` do WhatsApp em botões interativos nativos (`url` e `reply`) no privado (`@s.whatsapp.net`).
+  - Patch binário `deploy/evogo-server` montado em `/app/server:ro` para corrigir erro `473`/`405` e a renderização em dispositivos móveis (Android/iOS) e WhatsApp Web:
+    - Estrutura `<biz><interactive type="native_flow" v="1"><native_flow v="9" name="mixed"/></interactive></biz>` combinada com `<bot biz_bot="1"/>` em chats privados (`@s.whatsapp.net`).
+    - Serialização direta em `waE2E.Message.InteractiveMessage` (`NativeFlowMessage` unificado para `quick_reply` e `cta_url`), removendo o encapsulamento legado `documentWithCaptionMessage` e o campo proprietário `messageParamsJSON`.
+    - Uso direto do endpoint `/send/button` em [welcome.js](file:///c:/Users/theja/AlfaAltoGrup/shared/welcome.js) para envios privados 1-a-1 com fallback automático caso ocorra erro HTTP.
