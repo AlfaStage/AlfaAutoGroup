@@ -9,6 +9,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { InserirVariavel } from '@/components/InserirVariavel'
+import { toast } from '@/components/ui/use-toast'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Sparkles,
   Power,
@@ -48,6 +59,8 @@ export function PainelBoasVindas({
   const [salvando, setSalvando] = useState(false)
   const [testandoId, setTestandoId] = useState<string | null>(null)
   const [fazendoUpload, setFazendoUpload] = useState(false)
+  const [regraParaExcluir, setRegraParaExcluir] = useState<any | null>(null)
+
 
   // Estado do formulário de criação/edição de regra
   const [escopo, setEscopo] = useState<'tag' | 'group'>('tag')
@@ -126,10 +139,10 @@ export function PainelBoasVindas({
         if (data.mediatype) setMediatype(data.mediatype)
         if (data.filename) setFileName(data.filename)
       } else {
-        alert(data.error || 'Erro ao enviar arquivo')
+        toast.error(data.error || 'Erro ao enviar arquivo', 'Upload')
       }
     } catch {
-      alert('Falha no upload do arquivo')
+      toast.error('Falha no upload do arquivo', 'Upload')
     } finally {
       setFazendoUpload(false)
     }
@@ -180,11 +193,11 @@ export function PainelBoasVindas({
 
   const salvarRegra = async () => {
     if (escopo === 'tag' && !targetTagId) {
-      alert('Selecione uma Tag para vincular a regra de boas-vindas.')
+      toast.error('Selecione uma Tag para vincular a regra de boas-vindas.', 'Validação')
       return
     }
     if (escopo === 'group' && !targetGroupId) {
-      alert('Selecione um Grupo para vincular a regra de boas-vindas.')
+      toast.error('Selecione um Grupo para vincular a regra de boas-vindas.', 'Validação')
       return
     }
 
@@ -210,13 +223,13 @@ export function PainelBoasVindas({
       })
       const json = await res.json()
       if (!res.ok) {
-        alert(json.error || 'Erro ao salvar regra de boas-vindas')
+        toast.error(json.error || 'Erro ao salvar regra de boas-vindas', 'Erro')
         return
       }
       await carregar()
-      alert('Regra de boas-vindas salva com sucesso!')
+      toast.success('Regra de boas-vindas salva com sucesso!', 'Salvo')
     } catch {
-      alert('Erro de conexão ao salvar regra')
+      toast.error('Erro de conexão ao salvar regra', 'Conexão')
     } finally {
       setSalvando(false)
     }
@@ -276,27 +289,31 @@ export function PainelBoasVindas({
       })
       if (res.ok) await carregar()
     } catch {
-      alert('Erro ao alterar status da regra')
+      toast.error('Erro ao alterar status da regra', 'Status')
     }
   }
 
-  const excluirRegra = async (regra: any) => {
-    if (!confirm('Deseja realmente excluir esta regra de boas-vindas e limpar sua fila?')) return
+  const executarExclusaoRegra = async (regra: any) => {
     try {
       const res = await fetch('/api/welcome', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'delete', id: regra.id })
       })
-      if (res.ok) await carregar()
+      if (res.ok) {
+        toast.success('Regra de boas-vindas excluída com sucesso!', 'Exclusão')
+        await carregar()
+      } else {
+        toast.error('Erro ao excluir regra', 'Exclusão')
+      }
     } catch {
-      alert('Erro ao excluir regra')
+      toast.error('Erro ao excluir regra', 'Exclusão')
     }
   }
 
   const dispararTesteEntreInstancias = async (regra: any) => {
     if (!instanciaDestinoTeste && !telefoneTesteManual.trim()) {
-      alert('Selecione uma instância conectada de destino ou informe um número de teste.')
+      toast.error('Selecione uma instância conectada de destino ou informe um número de teste.', 'Validação')
       return
     }
     setTestandoId(regra.id)
@@ -319,15 +336,16 @@ export function PainelBoasVindas({
       })
       const json = await res.json()
       if (!res.ok || !json.ok) {
-        alert(json.error || 'Falha no envio de teste')
+        toast.error(json.error || 'Falha no envio de teste', 'Falha')
       } else {
-        alert(
-          `Teste enviado com sucesso!\nRemetente: ${json.senderInstance}\nDestino: ${json.recipient}`
+        toast.success(
+          `Teste enviado com sucesso!\nRemetente: ${json.senderInstance}\nDestino: ${json.recipient}`,
+          'Teste enviado'
         )
       }
       await carregar()
     } catch {
-      alert('Erro ao executar disparo de teste')
+      toast.error('Erro ao executar disparo de teste', 'Erro')
     } finally {
       setTestandoId(null)
     }
@@ -342,11 +360,11 @@ export function PainelBoasVindas({
       })
       const json = await res.json()
       if (res.ok) {
-        alert(`Ação concluída (${json.afetados || 0} registro(s) atualizado(s)).`)
+        toast.success(`Ação concluída (${json.afetados || 0} registro(s) atualizado(s)).`, 'Fila')
         await carregar()
       }
     } catch {
-      alert('Erro ao controlar fila de boas-vindas')
+      toast.error('Erro ao controlar fila de boas-vindas', 'Erro')
     }
   }
 
@@ -902,8 +920,8 @@ export function PainelBoasVindas({
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="text-red-400"
-                  onClick={() => excluirRegra(r)}
+                  className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                  onClick={() => setRegraParaExcluir(r)}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </Button>
@@ -985,6 +1003,33 @@ export function PainelBoasVindas({
           ))}
         </CardContent>
       </Card>
+
+      {/* Confirmação de Exclusão de Regra */}
+      <AlertDialog open={!!regraParaExcluir} onOpenChange={(open) => !open && setRegraParaExcluir(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Regra de Boas-Vindas</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deseja realmente excluir esta regra de boas-vindas e limpar sua fila pendente? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setRegraParaExcluir(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!regraParaExcluir) return
+                const r = regraParaExcluir
+                setRegraParaExcluir(null)
+                await executarExclusaoRegra(r)
+              }}
+            >
+              Excluir Regra
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
+
