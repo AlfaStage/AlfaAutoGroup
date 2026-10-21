@@ -6,6 +6,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { toast } from '@/components/ui/use-toast'
 import { KeyRound, Copy, Check, Trash2, Loader2, AlertTriangle, Plug } from 'lucide-react'
 
 type Chave = {
@@ -31,6 +43,7 @@ export default function KeysClient() {
   // A chave em texto só existe aqui, uma vez, logo após a criação.
   const [chaveNova, setChaveNova] = useState<string | null>(null)
   const [copiado, setCopiado] = useState(false)
+  const [chaveParaRevogar, setChaveParaRevogar] = useState<{ id: string; name: string } | null>(null)
 
   const carregar = useCallback(async () => {
     try {
@@ -63,6 +76,7 @@ export default function KeysClient() {
       }
 
       setChaveNova(data.key)
+      toast.success('Chave de API gerada com sucesso!', 'Chave Gerada')
       setNome('')
       setSenha('')
       carregar()
@@ -73,10 +87,21 @@ export default function KeysClient() {
     }
   }
 
-  const revogar = async (id: string, nomeChave: string) => {
-    if (!confirm(`Revogar a chave "${nomeChave}"? Quem estiver usando perde o acesso na hora.`)) return
-    await fetch(`/api/keys/${id}`, { method: 'DELETE' })
-    carregar()
+  const executarRevogacao = async () => {
+    if (!chaveParaRevogar) return
+    const { id, name } = chaveParaRevogar
+    setChaveParaRevogar(null)
+    try {
+      const res = await fetch(`/api/keys/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        toast.success(`Chave "${name}" revogada com sucesso.`)
+        carregar()
+      } else {
+        toast.error('Não foi possível revogar a chave.')
+      }
+    } catch {
+      toast.error('Erro de conexão ao revogar chave.')
+    }
   }
 
   const copiar = async () => {
@@ -84,6 +109,7 @@ export default function KeysClient() {
     try {
       await navigator.clipboard.writeText(chaveNova)
       setCopiado(true)
+      toast.info('Chave copiada para a área de transferência.')
       setTimeout(() => setCopiado(false), 2000)
     } catch { /* clipboard bloqueado */ }
   }
@@ -94,27 +120,26 @@ export default function KeysClient() {
   return (
     <div className="space-y-6">
       {chaveNova && (
-        <Card className="border-green-500/40 bg-green-500/5">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-green-500" /> Chave criada
-            </CardTitle>
-            <CardDescription className="flex items-start gap-2 text-amber-500">
-              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-              Copie agora. Ela não vai aparecer de novo — guardamos apenas o hash.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs bg-muted/60 border border-border/50 rounded-lg p-3 break-all">
+        <Alert variant="success" className="border-emerald-500/40 bg-emerald-950/20">
+          <KeyRound className="h-4 w-4 text-emerald-400" />
+          <div className="flex-1 space-y-2">
+            <AlertTitle className="text-base font-semibold text-emerald-300">
+              Chave de API criada
+            </AlertTitle>
+            <AlertDescription className="text-xs text-amber-400/90 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              Copie agora. Ela não será exibida novamente — armazenamos apenas o hash criptográfico.
+            </AlertDescription>
+            <div className="flex items-center gap-2 pt-1">
+              <code className="flex-1 text-xs bg-zinc-900 border border-zinc-700/60 rounded-lg p-3 font-mono break-all text-zinc-100 select-all">
                 {chaveNova}
               </code>
               <Button variant="outline" size="icon" onClick={copiar} title="Copiar">
-                {copiado ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                {copiado ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Alert>
       )}
 
       <Card className="border-border/40 bg-card/40">
@@ -165,9 +190,10 @@ export default function KeysClient() {
             </div>
 
             {erro && (
-              <p className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                {erro}
-              </p>
+              <Alert variant="destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>{erro}</AlertDescription>
+              </Alert>
             )}
 
             <Button type="submit" disabled={criando}>
@@ -201,8 +227,14 @@ export default function KeysClient() {
                     : 'nunca usada'}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => revogar(c.id, c.name)} title="Revogar">
-                <Trash2 className="w-4 h-4 text-red-500" />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setChaveParaRevogar({ id: c.id, name: c.name })}
+                title="Revogar"
+                className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
+              >
+                <Trash2 className="w-4 h-4" />
               </Button>
             </div>
           ))}
@@ -245,6 +277,27 @@ export default function KeysClient() {
           </p>
         </CardContent>
       </Card>
+
+      {/* Confirmação de Revogação de Chave */}
+      <AlertDialog open={!!chaveParaRevogar} onOpenChange={(open) => !open && setChaveParaRevogar(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revogar Chave de API</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deseja realmente revogar a chave &quot;{chaveParaRevogar?.name}&quot;? Serviços externos e integrações que utilizam esta chave perderão o acesso imediatamente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setChaveParaRevogar(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={executarRevogacao}
+            >
+              Revogar Chave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

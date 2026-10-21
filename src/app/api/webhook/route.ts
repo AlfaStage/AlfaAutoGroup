@@ -213,7 +213,7 @@ export async function POST(request: Request) {
             }
           }
 
-          if (!resolvedPhone && lidClean) {
+          if (!resolvedPhone && lidClean && group.instanceName) {
             if (!evoMap) {
               evoMap = await resolverParticipantesDoGrupoNaEvolution(
                 group.instanceName,
@@ -268,7 +268,7 @@ export async function POST(request: Request) {
           const eqResult = await enqueueWelcomeForJoin(prisma, {
             groupId: group.id,
             phone: resolvedPhone,
-            displayName: resolvedName || existing?.displayName || null
+            displayName: (resolvedName || existing?.displayName || null) as any
           }).catch(err => {
             console.error('[Webhook] Erro ao enfileirar boas-vindas:', err)
             return null

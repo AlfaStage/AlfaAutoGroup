@@ -1,153 +1,92 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import Link from 'next/link'
+import { useState, useEffect } from 'react'
 import BulkEditModal from './BulkEditModal'
-import SeletorDeGrupos from '@/components/SeletorDeGrupos'
-import InserirVariavel from '@/components/InserirVariavel'
 import PainelAuditoriaMembros from '@/components/PainelAuditoriaMembros'
 import PainelAgendaCampanhas from '@/components/PainelAgendaCampanhas'
 import { PainelBoasVindas } from '@/components/PainelBoasVindas'
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuSeparator, DropdownMenuTrigger
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RefreshCcw, Plus, QrCode, Users, CalendarDays, Activity, ClipboardPaste, CheckCircle2, AlertCircle, Clock, PowerOff, Upload, Trash2, Edit, KeyRound, BookOpen, MousePointerClick, CheckSquare, Square, PencilRuler, Tag as TagIcon, BarChart3, Search, MoreHorizontal, Wifi, WifiOff, ShieldCheck, CalendarClock, Sparkles } from 'lucide-react'
-import { Textarea } from '@/components/ui/textarea'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Calendar } from '@/components/ui/calendar'
-import { cn } from '@/lib/utils'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/use-toast'
+import {
+  RefreshCcw,
+  Plus,
+  QrCode,
+  Users,
+  ClipboardPaste,
+  Edit,
+  CheckSquare,
+  Square,
+  PencilRuler,
+  Tag as TagIcon,
+  Search,
+  MoreHorizontal,
+  ShieldCheck,
+  CalendarClock,
+  Sparkles,
+} from 'lucide-react'
 
-const ScrollDial = ({ max, value, onChange }: { max: number, value: number, onChange: (v: number) => void }) => {
-  const [offset, setOffset] = useState(value * 40);
-  const [isDragging, setIsDragging] = useState(false);
-  const startY = useRef(0);
-  const currentOffset = useRef(value * 40);
-  
-  useEffect(() => {
-    if (!isDragging) {
-      setOffset(value * 40);
-      currentOffset.current = value * 40;
-    }
-  }, [value, isDragging]);
-
-  const clamp = (val: number) => Math.max(0, Math.min(max * 40, val));
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    setIsDragging(true);
-    startY.current = e.clientY;
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-    const deltaY = startY.current - e.clientY;
-    startY.current = e.clientY;
-    currentOffset.current = clamp(currentOffset.current + deltaY);
-    setOffset(currentOffset.current);
-    
-    const index = Math.round(currentOffset.current / 40);
-    if (index !== value) onChange(index);
-  }
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-    setIsDragging(false);
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    const index = Math.round(currentOffset.current / 40);
-    const snappedOffset = index * 40;
-    setOffset(snappedOffset);
-    currentOffset.current = snappedOffset;
-    if (index !== value) onChange(index);
-  }
-  
-  const handleWheel = (e: React.WheelEvent) => {
-    let delta = e.deltaY;
-    if (Math.abs(delta) > 40) {
-      delta = Math.sign(delta) * 40;
-    }
-    const newOffset = clamp(currentOffset.current + delta);
-    currentOffset.current = newOffset;
-    setOffset(newOffset);
-    
-    const index = Math.round(newOffset / 40);
-    if (index !== value) onChange(index);
-  }
-
-  return (
-    <div 
-      className="h-[120px] w-16 border border-border/50 rounded-lg bg-card shadow-inner relative overflow-hidden select-none cursor-ns-resize"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onWheel={handleWheel}
-      style={{ touchAction: 'none' }}
-    >
-      <div 
-        className="absolute top-0 left-0 w-full"
-        style={{ 
-          transform: `translateY(${40 - offset}px)`,
-          transition: isDragging ? 'none' : 'transform 0.15s ease-out'
-        }}
-      >
-        {Array.from({length: max + 1}).map((_, i) => {
-          const distance = Math.abs(offset - i * 40);
-          const isCenter = distance < 20;
-          return (
-            <div 
-              key={i} 
-              className={`h-[40px] flex items-center justify-center text-lg transition-all ${isCenter ? 'text-primary font-bold scale-110' : 'text-muted-foreground scale-90 opacity-40 hover:opacity-80 hover:scale-100'}`}
-              onClick={() => {
-                if (!isDragging) {
-                  currentOffset.current = i * 40;
-                  setOffset(i * 40);
-                  onChange(i);
-                }
-              }}
-            >
-              {i.toString().padStart(2, '0')}
-            </div>
-          )
-        })}
-      </div>
-      <div className="absolute top-[40px] left-0 w-full h-[40px] border-y border-primary/20 pointer-events-none bg-primary/5" />
-    </div>
-  )
-}
+// Submódulos SRP do Dashboard
+import { InstanceStatusBar } from '@/app/dashboard/InstanceStatusBar'
+import { DashboardKpis } from '@/app/dashboard/DashboardKpis'
+import { GroupCardGrid } from '@/app/dashboard/GroupCardGrid'
+import { NewInstanceModal } from '@/app/dashboard/NewInstanceModal'
+import { QrCodeModal } from '@/app/dashboard/QrCodeModal'
+import { NewGroupModal } from '@/app/dashboard/NewGroupModal'
+import { MassCreateModal } from '@/app/dashboard/MassCreateModal'
+import { MassPasteModal } from '@/app/dashboard/MassPasteModal'
 
 export default function DashboardClient({ initialGroups }: { initialGroups: any[] }) {
   const [groups, setGroups] = useState(initialGroups)
-  
+
   // Instance state
   const [instances, setInstances] = useState<any[]>([])
   const [selectedInstance, setSelectedInstance] = useState<string>('')
   const [connectionState, setConnectionState] = useState<string>('unknown')
-  
-  // Modals
+
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false)
-  // Busca na lista de grupos: com dezenas de grupos, rolar nao resolve.
   const [buscaGrupos, setBuscaGrupos] = useState('')
-  // Filtro por tag
   const [tagFiltro, setTagFiltro] = useState<string>('todas')
-  // Selecao para edicao em massa
   const [modoSelecao, setModoSelecao] = useState(false)
   const [selecionados, setSelecionados] = useState<string[]>([])
   const [bulkAberto, setBulkAberto] = useState(false)
-  // Tags usadas como atalho de seleção na barra de edição em massa e no filtro
   const [tagsDoPainel, setTagsDoPainel] = useState<any[]>([])
   const [isQrModalOpen, setIsQrModalOpen] = useState(false)
   const [qrCodeBase64, setQrCodeBase64] = useState<string>('')
-  
+
   const [isInstanceModalOpen, setIsInstanceModalOpen] = useState(false)
-  const [newInstance, setNewInstance] = useState({ instanceName: '', proxyHost: '', proxyPort: '', proxyProtocol: 'http', proxyUsername: '', proxyPassword: '' })
-  const [newGroup, setNewGroup] = useState({ name: '', slug: '', description: '', participants: '', instanceName: '' })
+  const [newInstance, setNewInstance] = useState({
+    instanceName: '',
+    proxyHost: '',
+    proxyPort: '',
+    proxyProtocol: 'http',
+    proxyUsername: '',
+    proxyPassword: '',
+  })
+  const [newGroup, setNewGroup] = useState({
+    name: '',
+    slug: '',
+    description: '',
+    participants: '',
+    instanceName: '',
+  })
 
   // Mass Paste State
   const [isMassPasteModalOpen, setIsMassPasteModalOpen] = useState(false)
@@ -158,19 +97,18 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [searchTermPaste, setSearchTermPaste] = useState('')
 
   // Mass Create State
-  const [visaoAtiva, setVisaoAtiva] = useState<'grupos' | 'agenda' | 'auditoria' | 'boas_vindas'>('grupos')
+  const [visaoAtiva, setVisaoAtiva] = useState<string>('grupos')
   const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
   const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
   const [isCreating, setIsCreating] = useState(false)
-  const [searchTermCreate, setSearchTermCreate] = useState('')
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [campanhaMassa, setCampanhaMassa] = useState('')
-  
-  const getEmptySchedule = () => ({ 
-    type: 'text', 
-    text: '', 
-    mediaUrl: '', 
+
+  const getEmptySchedule = () => ({
+    type: 'text',
+    text: '',
+    mediaUrl: '',
     mediatype: 'image',
     caption: '',
     fileName: '',
@@ -182,32 +120,37 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     pollOptions: 'Opção 1, Opção 2',
     trackLinks: true,
     mentionAll: false,
-    scheduledAt: '' 
+    scheduledAt: '',
   })
-  
+
   const [newSchedules, setNewSchedules] = useState([getEmptySchedule()])
 
   const updateSchedule = (index: number, updates: any) => {
-    setNewSchedules(prev => prev.map((s, i) => i === index ? { ...s, ...updates } : s))
+    setNewSchedules((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, ...updates } : s))
+    )
   }
 
   useEffect(() => {
     fetch('/api/tags')
-      .then(r => (r.ok ? r.json() : []))
-      .then(d => setTagsDoPainel(Array.isArray(d) ? d : []))
-      .catch(() => { /* sem tags o painel segue normal */ })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setTagsDoPainel(Array.isArray(d) ? d : []))
+      .catch(() => {})
   }, [])
 
   // Fetch instances on mount
   useEffect(() => {
     fetch('/api/instances')
-      .then(res => res.json())
-      .then(resData => {
-        const data = Array.isArray(resData) ? resData : (resData.data || []);
+      .then((res) => res.json())
+      .then((resData) => {
+        const data = Array.isArray(resData) ? resData : resData.data || []
         if (Array.isArray(data)) {
           setInstances(data)
           const saved = localStorage.getItem('selectedInstance')
-          if (saved && data.find((i: any) => (i.instance?.instanceName || i.name) === saved)) {
+          if (
+            saved &&
+            data.find((i: any) => (i.instance?.instanceName || i.name) === saved)
+          ) {
             setSelectedInstance(saved)
           } else if (data.length > 0) {
             setSelectedInstance(data[0].instance?.instanceName || data[0].name || '')
@@ -219,80 +162,105 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
 
   // Poll connection state when an instance is selected
   useEffect(() => {
-    if (!selectedInstance) return;
-    
-    localStorage.setItem('selectedInstance', selectedInstance);
-    setNewGroup(prev => ({...prev, instanceName: selectedInstance}))
+    if (!selectedInstance) return
+
+    localStorage.setItem('selectedInstance', selectedInstance)
+    setNewGroup((prev) => ({ ...prev, instanceName: selectedInstance }))
 
     const checkStatus = async () => {
       try {
-        const selectedObj = instances.find(i => (i.instance?.instanceName || i.name) === selectedInstance)
+        const selectedObj = instances.find(
+          (i) => (i.instance?.instanceName || i.name) === selectedInstance
+        )
         const token = selectedObj?.token || ''
-        
+
         const res = await fetch(`/api/instances/${selectedInstance}/status`, {
-          headers: { 'x-instance-token': token }
+          headers: { 'x-instance-token': token },
         })
         if (res.ok) {
           const data = await res.json()
-          console.log("Status API Response:", data)
-          
-          let state = data.instance?.state || data.instance?.status || data.state || data.status || data.data?.state || 'unknown';
-          if (typeof state === 'string') state = state.toLowerCase();
+          let state =
+            data.instance?.state ||
+            data.instance?.status ||
+            data.state ||
+            data.status ||
+            data.data?.state ||
+            'unknown'
+          if (typeof state === 'string') state = state.toLowerCase()
 
-          // Se LoggedIn for falso, significa que não leu o QR Code ainda
           if (data.data?.LoggedIn === false) {
-            state = 'close';
-          } else if (state === 'close' || state === 'disconnected' || data.error || data.status === 'disconnected') {
-            state = 'close';
+            state = 'close'
+          } else if (
+            state === 'close' ||
+            state === 'disconnected' ||
+            data.error ||
+            data.status === 'disconnected'
+          ) {
+            state = 'close'
           } else if (data.data?.Connected && state === 'unknown') {
-            state = 'open';
+            state = 'open'
           }
-          
+
           setConnectionState(state)
         } else {
           setConnectionState('close')
         }
-      } catch(e) {
+      } catch (e) {
         setConnectionState('error')
       }
     }
 
-    checkStatus();
-    // 30s: a 5s o polling empilhava chamadas na Evolution e derrubava o keepalive
-    const interval = setInterval(checkStatus, 30000);
-    return () => clearInterval(interval);
+    checkStatus()
+    const interval = setInterval(checkStatus, 30000)
+    return () => clearInterval(interval)
   }, [selectedInstance, instances])
 
   const handleOpenQrCode = async () => {
-    if (!selectedInstance) return;
+    if (!selectedInstance) return
     try {
-      setQrCodeBase64('');
-      const selectedObj = instances.find(i => (i.instance?.instanceName || i.name) === selectedInstance)
+      setQrCodeBase64('')
+      const selectedObj = instances.find(
+        (i) => (i.instance?.instanceName || i.name) === selectedInstance
+      )
       const token = selectedObj?.token || ''
-      
-      console.log("Solicitando QR Code para a instância:", selectedInstance)
+
       const res = await fetch(`/api/instances/${selectedInstance}/connect`, {
-        headers: { 'x-instance-token': token }
+        headers: { 'x-instance-token': token },
       })
-      
+
       if (res.ok) {
         const data = await res.json()
-        console.log("QR Code API Response (Success):", data)
-        const base64Str = data.base64 || data.qrcode?.base64 || data.data?.base64 || data.data?.qrcode?.base64 || data.data?.qrcode || data.qrcode || '';
+        const base64Str =
+          data.base64 ||
+          data.qrcode?.base64 ||
+          data.data?.base64 ||
+          data.data?.qrcode?.base64 ||
+          data.data?.qrcode ||
+          data.qrcode ||
+          ''
         if (base64Str) {
           setQrCodeBase64(base64Str)
           setIsQrModalOpen(true)
         } else {
-          alert("O QR Code não foi retornado pela API. Verifique o console para mais detalhes.")
+          toast({
+            title: 'QR Code indisponível',
+            description: 'O QR Code não foi retornado pela API. Verifique o console.',
+            variant: 'destructive',
+          })
         }
       } else {
-        const errText = await res.text()
-        console.error("QR Code API Error:", res.status, errText)
-        alert("Erro ao buscar QR Code. Status: " + res.status)
+        toast({
+          title: 'Erro ao buscar QR Code',
+          description: `Status retornado: ${res.status}`,
+          variant: 'destructive',
+        })
       }
-    } catch(e) {
-      console.error("Erro interno ao buscar QR Code:", e)
-      alert("Erro interno ao buscar QR Code.")
+    } catch (e) {
+      toast({
+        title: 'Erro interno',
+        description: 'Erro interno ao buscar QR Code.',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -302,22 +270,38 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       const res = await fetch('/api/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newGroup)
+        body: JSON.stringify(newGroup),
       })
       if (res.ok) {
         const created = await res.json()
         setGroups([...groups, { ...created, _count: { members: 0, schedules: 0 } }])
         setIsModalOpen(false)
-        setNewGroup({ name: '', slug: '', description: '', participants: '', instanceName: selectedInstance })
-        alert("Grupo criado com sucesso!")
+        setNewGroup({
+          name: '',
+          slug: '',
+          description: '',
+          participants: '',
+          instanceName: selectedInstance,
+        })
+        toast({
+          title: 'Grupo criado',
+          description: 'Grupo criado com sucesso!',
+          variant: 'success',
+        })
       } else {
         const err = await res.json()
-        console.error("Erro ao criar grupo (API):", err)
-        alert("Erro ao criar grupo: " + (err.error || err.details || "Desconhecido"))
+        toast({
+          title: 'Erro ao criar grupo',
+          description: err.error || err.details || 'Desconhecido',
+          variant: 'destructive',
+        })
       }
     } catch (err) {
-      console.error(err)
-      alert("Erro fatal ao criar grupo.")
+      toast({
+        title: 'Erro fatal',
+        description: 'Erro fatal ao criar grupo.',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -327,60 +311,84 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       const res = await fetch('/api/instances/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newInstance)
+        body: JSON.stringify(newInstance),
       })
       if (res.ok) {
-        console.log("Instância criada com sucesso!")
         setIsInstanceModalOpen(false)
-        setNewInstance({ instanceName: '', proxyHost: '', proxyPort: '', proxyProtocol: 'http', proxyUsername: '', proxyPassword: '' })
+        setNewInstance({
+          instanceName: '',
+          proxyHost: '',
+          proxyPort: '',
+          proxyProtocol: 'http',
+          proxyUsername: '',
+          proxyPassword: '',
+        })
         window.location.reload()
       } else {
-        const err = await res.json()
-        console.error("Erro da Evolution API ao criar instância:", err)
-        alert("Erro ao criar instância. Abra o console (F12) para ver os detalhes completos.")
+        toast({
+          title: 'Erro ao criar instância',
+          description: 'Abra o console (F12) para ver os detalhes completos.',
+          variant: 'destructive',
+        })
       }
     } catch (err) {
-      console.error("Falha na rede ao criar instância:", err)
-      alert("Falha na rede ao tentar criar a instância.")
+      toast({
+        title: 'Falha na rede',
+        description: 'Falha na rede ao tentar criar a instância.',
+        variant: 'destructive',
+      })
     }
   }
 
   const handleSyncGroups = async () => {
-    if (!selectedInstance) return;
+    if (!selectedInstance) return
     try {
-      const selectedObj = instances.find(i => (i.instance?.instanceName || i.name) === selectedInstance)
+      const selectedObj = instances.find(
+        (i) => (i.instance?.instanceName || i.name) === selectedInstance
+      )
       const token = selectedObj?.token || ''
       const res = await fetch(`/api/instances/${selectedInstance}/sync-groups`, {
         method: 'POST',
-        headers: { 'x-instance-token': token }
-      });
+        headers: { 'x-instance-token': token },
+      })
       if (res.ok) {
-        alert("Grupos sincronizados com sucesso!");
-        window.location.reload();
+        toast({
+          title: 'Sincronizado',
+          description: 'Grupos sincronizados com sucesso!',
+          variant: 'success',
+        })
+        window.location.reload()
       } else {
-        alert("Erro ao sincronizar grupos.");
+        toast({
+          title: 'Erro de sincronização',
+          description: 'Não foi possível sincronizar os grupos.',
+          variant: 'destructive',
+        })
       }
-    } catch(e) {
-      alert("Erro ao sincronizar grupos.");
-      console.error(e)
+    } catch (e) {
+      toast({
+        title: 'Erro de sincronização',
+        description: 'Erro ao sincronizar grupos.',
+        variant: 'destructive',
+      })
     }
   }
 
   const validatePastedJSON = (text: string) => {
     try {
-      if (!text.trim()) return "Vazio"
+      if (!text.trim()) return 'Vazio'
       const parsed = JSON.parse(text)
-      if (!Array.isArray(parsed)) return "O JSON deve ser um array."
-      if (parsed.length === 0) return "Array vazio."
-      
+      if (!Array.isArray(parsed)) return 'O JSON deve ser um array.'
+      if (parsed.length === 0) return 'Array vazio.'
+
       for (const item of parsed) {
         if (!item.type || !item.content || !item.scheduledAt) {
-          return "Cada item deve ter type, content e scheduledAt."
+          return 'Cada item deve ter type, content e scheduledAt.'
         }
       }
-      return "" // Sucesso
+      return ''
     } catch (e) {
-      return "JSON inválido."
+      return 'JSON inválido.'
     }
   }
 
@@ -389,12 +397,12 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       const text = await navigator.clipboard.readText()
       const err = validatePastedJSON(text)
       setMassPasteText(text)
-      setMassPasteError(err || "")
+      setMassPasteError(err || '')
       setSelectedGroupsForPaste([])
       setIsMassPasteModalOpen(true)
     } catch (err) {
       setMassPasteText('')
-      setMassPasteError("Cole o código JSON aqui")
+      setMassPasteError('Cole o código JSON aqui')
       setSelectedGroupsForPaste([])
       setIsMassPasteModalOpen(true)
     }
@@ -406,30 +414,38 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
     try {
       const schedulesToPaste = JSON.parse(massPasteText)
       let insertedCount = 0
-      
+
       for (const sched of schedulesToPaste) {
         const payload = {
           groupIds: selectedGroupsForPaste,
           type: sched.type,
           content: sched.content,
           scheduledAt: sched.scheduledAt,
-          status: 'pending'
+          status: 'pending',
         }
         const res = await fetch('/api/schedules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
         })
         if (res.ok) {
           insertedCount++
         }
       }
-      
-      alert(`${insertedCount} agendamento(s) colado(s) com sucesso em ${selectedGroupsForPaste.length} grupo(s)!`)
+
+      toast({
+        title: 'Agendamentos colados',
+        description: `${insertedCount} agendamento(s) colado(s) com sucesso em ${selectedGroupsForPaste.length} grupo(s)!`,
+        variant: 'success',
+      })
       setIsMassPasteModalOpen(false)
       window.location.reload()
     } catch (e) {
-      alert("Erro ao colar agendamentos.")
+      toast({
+        title: 'Erro ao colar',
+        description: 'Erro ao colar agendamentos.',
+        variant: 'destructive',
+      })
     } finally {
       setIsPasting(false)
     }
@@ -448,70 +464,104 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       if (!text) return
       const parsed = JSON.parse(text)
       const arr = Array.isArray(parsed) ? parsed : [parsed]
-      
-      const newItems = arr.map(item => {
-        return {
-          type: item.type || 'text',
-          text: item.type === 'text' ? item.content?.text || '' : '',
-          mediaUrl: (item.type === 'media' || item.type === 'button') ? (item.content?.media || item.content?.imageUrl || item.content?.videoUrl || '') : '',
-          mediatype: item.type === 'media' ? (item.content?.mediatype || 'image') : (item.content?.videoUrl ? 'video' : 'image'),
-          caption: item.content?.caption || '',
-          fileName: item.content?.fileName || '',
-          title: item.content?.title || '',
-          description: item.content?.description || '',
-          footer: item.content?.footer || '',
-          buttonsList: item.content?.buttons && item.content.buttons.length > 0 ? item.content.buttons : [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
-          pollName: item.content?.name || '',
-          pollOptions: item.content?.values ? item.content.values.join(', ') : 'Opção 1, Opção 2',
-          trackLinks: item.content?.trackLinks !== false,
-          mentionAll: Boolean(item.content?.mentionAll),
-          scheduledAt: item.scheduledAt ? new Date(item.scheduledAt).toISOString().slice(0, 16) : ''
-        }
-      })
-      
-      setNewSchedules(prev => {
-        if (prev.length === 1 && prev[0].type === 'text' && !prev[0].text && !prev[0].scheduledAt) {
+
+      const newItems = arr.map((item) => ({
+        type: item.type || 'text',
+        text: item.type === 'text' ? item.content?.text || '' : '',
+        mediaUrl:
+          item.type === 'media' || item.type === 'button'
+            ? item.content?.media || item.content?.imageUrl || item.content?.videoUrl || ''
+            : '',
+        mediatype:
+          item.type === 'media'
+            ? item.content?.mediatype || 'image'
+            : item.content?.videoUrl
+              ? 'video'
+              : 'image',
+        caption: item.content?.caption || '',
+        fileName: item.content?.fileName || '',
+        title: item.content?.title || '',
+        description: item.content?.description || '',
+        footer: item.content?.footer || '',
+        buttonsList:
+          item.content?.buttons && item.content.buttons.length > 0
+            ? item.content.buttons
+            : [{ type: 'reply', displayText: 'Sim', id: 'btn1' }],
+        pollName: item.content?.name || '',
+        pollOptions: item.content?.values
+          ? item.content.values.join(', ')
+          : 'Opção 1, Opção 2',
+        trackLinks: item.content?.trackLinks !== false,
+        mentionAll: Boolean(item.content?.mentionAll),
+        scheduledAt: item.scheduledAt
+          ? new Date(item.scheduledAt).toISOString().slice(0, 16)
+          : '',
+      }))
+
+      setNewSchedules((prev) => {
+        if (
+          prev.length === 1 &&
+          prev[0].type === 'text' &&
+          !prev[0].text &&
+          !prev[0].scheduledAt
+        ) {
           return newItems
         }
         return [...prev, ...newItems]
       })
     } catch (e) {
-      alert("Erro ao colar: O texto na área de transferência não é um JSON válido de agendamento.")
+      toast({
+        title: 'JSON inválido',
+        description: 'O texto na área de transferência não é um JSON válido de agendamento.',
+        variant: 'destructive',
+      })
     }
   }
 
   const handleMassCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (selectedGroupsForCreate.length === 0) {
-      alert("Selecione pelo menos um grupo destino.")
+      toast({
+        title: 'Atenção',
+        description: 'Selecione pelo menos um grupo destino.',
+        variant: 'warning',
+      })
       return
     }
 
     for (const schedule of newSchedules) {
       if (!schedule.scheduledAt) {
-        alert("Preencha a Data e Hora para todas as mensagens.")
+        toast({
+          title: 'Atenção',
+          description: 'Preencha a Data e Hora para todas as mensagens.',
+          variant: 'warning',
+        })
         return
       }
     }
 
     setIsCreating(true)
-    
+
     try {
       let insertedCount = 0
       for (const groupId of selectedGroupsForCreate) {
         for (const schedule of newSchedules) {
           let content: any = {}
-          
+
           if (schedule.type === 'text') {
-            content = { text: schedule.text, trackLinks: Boolean(schedule.trackLinks), mentionAll: Boolean(schedule.mentionAll) }
+            content = {
+              text: schedule.text,
+              trackLinks: Boolean(schedule.trackLinks),
+              mentionAll: Boolean(schedule.mentionAll),
+            }
           } else if (schedule.type === 'media') {
-            content = { 
-              mediatype: schedule.mediatype, 
-              media: schedule.mediaUrl, 
+            content = {
+              mediatype: schedule.mediatype,
+              media: schedule.mediaUrl,
               caption: schedule.caption,
               fileName: schedule.fileName,
               trackLinks: Boolean(schedule.trackLinks),
-              mentionAll: Boolean(schedule.mentionAll)
+              mentionAll: Boolean(schedule.mentionAll),
             }
           } else if (schedule.type === 'button') {
             content = {
@@ -519,7 +569,7 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               description: schedule.description,
               footer: schedule.footer,
               buttons: schedule.buttonsList,
-              mentionAll: Boolean(schedule.mentionAll)
+              mentionAll: Boolean(schedule.mentionAll),
             }
             const hasCTA = schedule.buttonsList.some((b: any) => b.type !== 'reply')
             if (!hasCTA && schedule.mediaUrl) {
@@ -530,12 +580,15 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
               }
             }
           } else if (schedule.type === 'poll') {
-            const opts = schedule.pollOptions.split(',').map(o => o.trim()).filter(Boolean);
+            const opts = schedule.pollOptions
+              .split(',')
+              .map((o: string) => o.trim())
+              .filter(Boolean)
             content = {
               name: schedule.pollName,
               selectableCount: 1,
               values: opts,
-              mentionAll: Boolean(schedule.mentionAll)
+              mentionAll: Boolean(schedule.mentionAll),
             }
           }
 
@@ -545,1076 +598,409 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
             content,
             campaign: campanhaMassa ? campanhaMassa.trim() : null,
             scheduledAt: new Date(schedule.scheduledAt).toISOString(),
-            status: 'pending'
+            status: 'pending',
           }
-          
+
           const res = await fetch('/api/schedules', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
           })
           if (res.ok) {
             insertedCount++
           }
         }
       }
-      
-      alert(`${insertedCount} agendamento(s) criado(s) com sucesso em ${selectedGroupsForCreate.length} grupo(s)!`)
+
+      toast({
+        title: 'Sucesso',
+        description: `${insertedCount} agendamento(s) criado(s) com sucesso em ${selectedGroupsForCreate.length} grupo(s)!`,
+        variant: 'success',
+      })
       setIsMassCreateModalOpen(false)
       window.location.reload()
     } catch (err) {
-      console.error(err)
-      alert("Erro ao criar agendamentos em massa.")
+      toast({
+        title: 'Erro',
+        description: 'Erro ao criar agendamentos em massa.',
+        variant: 'destructive',
+      })
     } finally {
       setIsCreating(false)
     }
   }
 
   const gruposDaInstancia = selectedInstance
-    ? groups.filter(g => g.instanceName === selectedInstance).sort((a, b) => a.name.localeCompare(b.name))
+    ? groups
+        .filter((g) => g.instanceName === selectedInstance)
+        .sort((a, b) => a.name.localeCompare(b.name))
     : []
 
   const termoBusca = buscaGrupos.trim().toLowerCase()
-  const filteredGroups = gruposDaInstancia.filter(g => {
-    const matchesBusca = !termoBusca || (
+  const filteredGroups = gruposDaInstancia.filter((g) => {
+    const matchesBusca =
+      !termoBusca ||
       g.name.toLowerCase().includes(termoBusca) ||
       (g.description || '').toLowerCase().includes(termoBusca)
-    )
-    const matchesTag = tagFiltro === 'todas'
-      ? true
-      : tagFiltro === 'sem_tag'
-        ? (!g.tags || g.tags.length === 0)
-        : (Array.isArray(g.tags) && g.tags.some((gt: any) =>
-            gt.tagId === tagFiltro || gt.tag?.id === tagFiltro || gt.tag?.slug === tagFiltro
-          ))
+    const matchesTag =
+      tagFiltro === 'todas'
+        ? true
+        : tagFiltro === 'sem_tag'
+          ? !g.tags || g.tags.length === 0
+          : Array.isArray(g.tags) &&
+            g.tags.some(
+              (gt: any) =>
+                gt.tagId === tagFiltro ||
+                gt.tag?.id === tagFiltro ||
+                gt.tag?.slug === tagFiltro
+            )
     return matchesBusca && matchesTag
   })
 
-  const filteredGroupsForPaste = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermPaste.toLowerCase()))
-  const filteredGroupsForCreate = filteredGroups.filter(g => g.name.toLowerCase().includes(searchTermCreate.toLowerCase()))
-  const totalGroups = filteredGroups.length
-  const totalMembers = filteredGroups.reduce((acc, g) => acc + (g._count?.members || 0), 0)
-  const totalSchedules = filteredGroups.reduce((acc, g) => acc + (g._count?.schedules || 0), 0)
-
-  const totalSent = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'sent').length || 0), 0)
-  const totalPending = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'pending').length || 0), 0)
-  const totalError = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'error').length || 0), 0)
-  const totalDeactivated = filteredGroups.reduce((acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'deactivated').length || 0), 0)
+  const totalSent = filteredGroups.reduce(
+    (acc, g) => acc + (g.schedules?.filter((s: any) => s.status === 'sent').length || 0),
+    0
+  )
+  const totalPending = filteredGroups.reduce(
+    (acc, g) =>
+      acc + (g.schedules?.filter((s: any) => s.status === 'pending').length || 0),
+    0
+  )
+  const totalError = filteredGroups.reduce(
+    (acc, g) =>
+      acc + (g.schedules?.filter((s: any) => s.status === 'error').length || 0),
+    0
+  )
+  const totalDeactivated = filteredGroups.reduce(
+    (acc, g) =>
+      acc +
+      (g.schedules?.filter((s: any) => s.status === 'deactivated').length || 0),
+    0
+  )
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      
-      {/* Instância e conexão: a primeira pergunta é sempre "está no ar?" */}
-      <Card className={`border-border/40 shadow-sm backdrop-blur-sm transition-colors ${
-        connectionState === 'open' ? 'bg-card/60' : 'bg-red-500/5 border-red-500/30'
-      }`}>
-        <CardContent className="p-4 flex flex-wrap items-center gap-3">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
-            connectionState === 'open'
-              ? 'bg-green-500/10 text-green-500'
-              : connectionState === 'connecting'
-                ? 'bg-yellow-500/10 text-yellow-500'
-                : 'bg-red-500/10 text-red-500'
-          }`}>
-            {connectionState === 'open'
-              ? <Wifi className="w-4 h-4" />
-              : <WifiOff className="w-4 h-4" />}
-            {connectionState === 'open' ? 'Conectado' : connectionState === 'connecting' ? 'Conectando…' : 'Desconectado'}
-          </div>
+      {/* 1. Barra de status da conexão e seleção da instância */}
+      <InstanceStatusBar
+        connectionState={connectionState}
+        selectedInstance={selectedInstance}
+        setSelectedInstance={setSelectedInstance}
+        instances={instances}
+        onOpenQrCode={handleOpenQrCode}
+        onOpenNewInstance={() => setIsInstanceModalOpen(true)}
+      />
 
-          <Select value={selectedInstance} onValueChange={setSelectedInstance}>
-            <SelectTrigger className="w-full sm:w-[220px]">
-              <SelectValue placeholder="Selecione a instância…" />
-            </SelectTrigger>
-            <SelectContent>
-              {instances.map((inst, i) => {
-                const name = inst.instance?.instanceName || inst.name;
-                return <SelectItem key={i} value={name}>{name}</SelectItem>
-              })}
-            </SelectContent>
-          </Select>
+      {/* 2. Métricas do dia (KPIs) */}
+      <DashboardKpis
+        totalSent={totalSent}
+        totalPending={totalPending}
+        totalError={totalError}
+        totalDeactivated={totalDeactivated}
+      />
 
-          <div className="flex items-center gap-2 ml-auto">
-            {connectionState !== 'open' && selectedInstance && (
-              <Button variant="default" size="sm" onClick={handleOpenQrCode}>
-                <QrCode className="w-4 h-4 mr-2" />
-                Conectar
-              </Button>
-            )}
-            <Button variant="outline" size="icon" onClick={() => setIsInstanceModalOpen(true)} title="Nova instância">
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* 3. Seletor de Visão Principal padronizado com Tabs */}
+      <Tabs value={visaoAtiva} onValueChange={setVisaoAtiva} className="w-full space-y-4">
+        <TabsList className="bg-muted/40 p-1 border border-border/40 flex flex-wrap h-auto gap-1">
+          <TabsTrigger value="grupos" className="gap-1.5">
+            <Users className="w-4 h-4" /> Meus Grupos ({gruposDaInstancia.length})
+          </TabsTrigger>
+          <TabsTrigger value="agenda" className="gap-1.5">
+            <CalendarClock className="w-4 h-4" /> Agenda &amp; Fila Global ({totalPending})
+          </TabsTrigger>
+          <TabsTrigger value="auditoria" className="gap-1.5">
+            <ShieldCheck className="w-4 h-4" /> Auditoria de Membros &amp; DDDs
+          </TabsTrigger>
+          <TabsTrigger value="boas_vindas" className="gap-1.5">
+            <Sparkles className="w-4 h-4" /> Boas-Vindas (PV)
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Métricas do dia */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="border-border/40 shadow-sm bg-green-500/5">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-green-600/80 uppercase">Enviadas</p>
-              <p className="text-2xl font-bold mt-1 text-green-600">{totalSent}</p>
-            </div>
-            <div className="p-2 bg-green-500/10 rounded-full">
-              <CheckCircle2 className="w-5 h-5 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border/40 shadow-sm bg-primary/5">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-primary/80 uppercase">Pendentes</p>
-              <p className="text-2xl font-bold mt-1 text-primary">{totalPending}</p>
-            </div>
-            <div className="p-2 bg-primary/10 rounded-full">
-              <Clock className="w-5 h-5 text-primary" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border/40 shadow-sm bg-red-500/5">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-red-600/80 uppercase">Com Falha</p>
-              <p className="text-2xl font-bold mt-1 text-red-600">{totalError}</p>
-            </div>
-            <div className="p-2 bg-red-500/10 rounded-full">
-              <AlertCircle className="w-5 h-5 text-red-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border/40 shadow-sm bg-muted/20">
-          <CardContent className="p-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase">Desativadas</p>
-              <p className="text-2xl font-bold mt-1 text-foreground">{totalDeactivated}</p>
-            </div>
-            <div className="p-2 bg-muted rounded-full">
-              <PowerOff className="w-5 h-5 text-muted-foreground" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+        <TabsContent value="agenda" className="mt-4">
+          <PainelAgendaCampanhas
+            tags={tagsDoPainel}
+            instances={instances}
+            onChanged={() => window.location.reload()}
+          />
+        </TabsContent>
 
-      {/* Seletor de Visão Principal */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
-        <Button
-          variant={visaoAtiva === 'grupos' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setVisaoAtiva('grupos')}
-          className="gap-1.5"
-        >
-          <Users className="w-4 h-4" /> Meus Grupos ({gruposDaInstancia.length})
-        </Button>
-        <Button
-          variant={visaoAtiva === 'agenda' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setVisaoAtiva('agenda')}
-          className="gap-1.5"
-        >
-          <CalendarClock className="w-4 h-4" /> Agenda &amp; Fila Global ({totalPending})
-        </Button>
-        <Button
-          variant={visaoAtiva === 'auditoria' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setVisaoAtiva('auditoria')}
-          className="gap-1.5"
-        >
-          <ShieldCheck className="w-4 h-4" /> Auditoria de Membros &amp; DDDs
-        </Button>
-        <Button
-          variant={visaoAtiva === 'boas_vindas' ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => setVisaoAtiva('boas_vindas')}
-          className="gap-1.5"
-        >
-          <Sparkles className="w-4 h-4" /> Boas-Vindas (PV)
-        </Button>
-      </div>
+        <TabsContent value="boas_vindas" className="mt-4">
+          <PainelBoasVindas groups={groups} tags={tagsDoPainel} />
+        </TabsContent>
 
-      {visaoAtiva === 'agenda' && (
-        <PainelAgendaCampanhas
-          tags={tagsDoPainel}
-          instances={instances}
-          onChanged={() => window.location.reload()}
-        />
-      )}
+        <TabsContent value="auditoria" className="mt-4">
+          <PainelAuditoriaMembros
+            tagId={
+              tagFiltro !== 'todas' && tagFiltro !== 'sem_tag' ? tagFiltro : undefined
+            }
+          />
+        </TabsContent>
 
-      {visaoAtiva === 'boas_vindas' && (
-        <PainelBoasVindas groups={groups} tags={tagsDoPainel} />
-      )}
-
-      {visaoAtiva === 'auditoria' && (
-        <PainelAuditoriaMembros
-          tagId={tagFiltro !== 'todas' && tagFiltro !== 'sem_tag' ? tagFiltro : undefined}
-        />
-      )}
-
-      {/* Groups Section */}
-      {visaoAtiva === 'grupos' && (
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
-            <span className="text-sm text-muted-foreground whitespace-nowrap">
-              {termoBusca
-                ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
-                : `${gruposDaInstancia.length} grupo(s)`}
-            </span>
-          </div>
-
-          {/* Busca e filtro por tags: e o que mais se usa quando ha dezenas de grupos */}
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <Input
-                placeholder="Buscar grupo pelo nome ou descrição…"
-                value={buscaGrupos}
-                onChange={e => setBuscaGrupos(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-
-            {tagsDoPainel.length > 0 && (
-              <Select value={tagFiltro} onValueChange={setTagFiltro}>
-                <SelectTrigger className="w-full sm:w-[200px]">
-                  <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                  <SelectValue placeholder="Todas as tags" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todas">Todas as tags</SelectItem>
-                  <SelectItem value="sem_tag">Sem tag</SelectItem>
-                  {tagsDoPainel.map(t => (
-                    <SelectItem key={t.id} value={t.id}>
-                      <span className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: t.color || '#6366f1' }} />
-                        {t.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-
-            <div className="flex items-center gap-2">
-              {/* Ação primária: é o que se faz todo dia */}
-              <Button variant="secondary" onClick={handleSyncGroups} className="flex-1 sm:flex-none">
-                <RefreshCcw className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Sincronizar</span>
-              </Button>
-
-              <Button onClick={() => setIsModalOpen(true)} className="flex-1 sm:flex-none">
-                <Plus className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Novo grupo</span>
-              </Button>
-
-              {/* O resto entra num menu, em vez de nove botões competindo */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" title="Mais ações">
-                    <MoreHorizontal className="w-4 h-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-60">
-                  <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => { setModoSelecao(!modoSelecao); setSelecionados([]) }}>
-                    <PencilRuler className="w-4 h-4 mr-2" />
-                    {modoSelecao ? 'Cancelar seleção' : 'Editar nome, foto e descrição'}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleMassCreateClick}>
-                    <Edit className="w-4 h-4 mr-2" />
-                    Agendar em massa
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleMassPasteClick}>
-                    <ClipboardPaste className="w-4 h-4 mr-2" />
-                    Colar agendamentos (JSON)
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Instância</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={handleOpenQrCode}>
-                    <QrCode className="w-4 h-4 mr-2" />
-                    QR Code de conexão
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Nova instância
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-        </div>
-
-        {modoSelecao && (
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelecionados(
-                  selecionados.length === filteredGroups.length
-                    ? []
-                    : filteredGroups.map((g: any) => g.id)
-                )}
-              >
-                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
-                  ? <CheckSquare className="w-4 h-4 mr-2" />
-                  : <Square className="w-4 h-4 mr-2" />}
-                {selecionados.length === filteredGroups.length && filteredGroups.length > 0
-                  ? 'Desmarcar todos'
-                  : 'Marcar todos'}
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                {selecionados.length} grupo(s) selecionado(s)
+        <TabsContent value="grupos" className="space-y-4 mt-4">
+          <div className="space-y-3">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
+              <span className="text-sm text-muted-foreground whitespace-nowrap">
+                {termoBusca
+                  ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
+                  : `${gruposDaInstancia.length} grupo(s)`}
               </span>
-
-              {/* Atalhos por tag: um clique traz todos os grupos dela */}
-              {tagsDoPainel.map(t => {
-                const idsAqui = t.grupos
-                  .map((g: any) => g.id)
-                  .filter((id: string) => filteredGroups.some((fg: any) => fg.id === id))
-                if (idsAqui.length === 0) return null
-                const todosJa = idsAqui.every((id: string) => selecionados.includes(id))
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setSelecionados(
-                      todosJa
-                        ? selecionados.filter(id => !idsAqui.includes(id))
-                        : Array.from(new Set([...selecionados, ...idsAqui]))
-                    )}
-                    className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                      todosJa ? 'border-transparent text-white' : 'border-border/60 bg-muted/20 hover:bg-muted/40'
-                    }`}
-                    style={todosJa ? { backgroundColor: t.color } : undefined}
-                    title={`Marcar os ${idsAqui.length} grupo(s) da tag ${t.name}`}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: todosJa ? 'rgba(255,255,255,.85)' : t.color }}
-                    />
-                    {t.name}
-                    <span className="opacity-70">{idsAqui.length}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <Button disabled={selecionados.length === 0} onClick={() => setBulkAberto(true)}>
-              <PencilRuler className="w-4 h-4 mr-2" />
-              Editar selecionados
-            </Button>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredGroups.map(g => (
-            <div
-              key={g.id}
-              onClick={modoSelecao ? () => setSelecionados(prev =>
-                prev.includes(g.id) ? prev.filter(i => i !== g.id) : [...prev, g.id]
-              ) : undefined}
-              className={modoSelecao ? 'cursor-pointer' : ''}
-            >
-            <ConditionalLink href={`/${g.slug}`} desativado={modoSelecao}>
-              <Card className={`group h-full border-border/40 transition-all duration-300 bg-card/40 cursor-pointer ${
-                modoSelecao && selecionados.includes(g.id)
-                  ? 'border-primary ring-2 ring-primary/40'
-                  : 'hover:border-primary/50 hover:shadow-lg hover:-translate-y-1'
-              }`}>
-                <CardHeader className="flex flex-row items-center gap-4 pb-2">
-                  {g.picture ? (
-                    <img src={g.picture} alt={g.name} className="w-12 h-12 rounded-lg object-cover ring-1 ring-border" />
-                  ) : (
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-lg ring-1 ring-border/50">
-                      {g.name.substring(0, 2).toUpperCase()}
-                    </div>
-                  )}
-                  <div className="flex-1 overflow-hidden">
-                    <CardTitle className="text-base truncate group-hover:text-primary transition-colors">{g.name}</CardTitle>
-                    <CardDescription className="truncate text-xs">{g.description || 'Sem descrição'}</CardDescription>
-                    {Array.isArray(g.tags) && g.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {g.tags.map((gt: any) => {
-                          const tag = gt.tag || gt;
-                          if (!tag?.name) return null;
-                          return (
-                            <span
-                              key={tag.id || gt.tagId}
-                              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium border"
-                              style={{
-                                borderColor: tag.color ? `${tag.color}40` : '#6366f140',
-                                backgroundColor: tag.color ? `${tag.color}15` : '#6366f115',
-                                color: tag.color || '#6366f1'
-                              }}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color || '#6366f1' }} />
-                              {tag.name}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {(() => {
-                    const membros = g.participantCount || g._count?.members || 0
-                    const tagCap = g.tags?.[0]?.tag?.capacity || 950
-                    const pct = Math.min(100, Math.round((membros / tagCap) * 100))
-                    const vagas = Math.max(0, tagCap - membros)
-                    const barColor =
-                      pct >= 95
-                        ? 'bg-red-500'
-                        : pct >= 80
-                          ? 'bg-amber-500'
-                          : 'bg-emerald-500'
-                    return (
-                      <div className="space-y-1.5 bg-muted/30 p-2 rounded-md mb-2">
-                        <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-                          <div className="flex items-center gap-1.5">
-                            <Users className="w-3.5 h-3.5" />
-                            <span>
-                              {membros}/{tagCap} ({pct}%)
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px]">{vagas} vagas</span>
-                            <span className="flex items-center gap-1">
-                              <CalendarDays className="w-3.5 h-3.5" />
-                              {g._count.schedules}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-muted/60 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${barColor} transition-all`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })()}
-                  
-                  {/* Status Badges */}
-                  <div className="grid grid-cols-4 gap-1 text-[10px] text-center font-bold">
-                    {(() => {
-                      const sent = g.schedules?.filter((s: any) => s.status === 'sent').length || 0;
-                      const pending = g.schedules?.filter((s: any) => s.status === 'pending').length || 0;
-                      const error = g.schedules?.filter((s: any) => s.status === 'error').length || 0;
-                      const deactivated = g.schedules?.filter((s: any) => s.status === 'deactivated').length || 0;
-                      
-                      return (
-                        <>
-                          <div className="bg-green-500/10 text-green-500 rounded p-1 flex flex-col items-center justify-center border border-green-500/20" title="Enviadas">
-                            <CheckCircle2 className="w-3.5 h-3.5 mb-0.5" /> {sent}
-                          </div>
-                          <div className="bg-primary/10 text-primary rounded p-1 flex flex-col items-center justify-center border border-primary/20" title="Pendentes">
-                            <Clock className="w-3.5 h-3.5 mb-0.5" /> {pending}
-                          </div>
-                          <div className="bg-red-500/10 text-red-500 rounded p-1 flex flex-col items-center justify-center border border-red-500/20" title="Falhas">
-                            <AlertCircle className="w-3.5 h-3.5 mb-0.5" /> {error}
-                          </div>
-                          <div className="bg-muted text-muted-foreground rounded p-1 flex flex-col items-center justify-center border border-border" title="Desativadas">
-                            <PowerOff className="w-3.5 h-3.5 mb-0.5" /> {deactivated}
-                          </div>
-                        </>
-                      )
-                    })()}
-                  </div>
-                </CardContent>
-              </Card>
-            </ConditionalLink>
-            </div>
-          ))}
-          {filteredGroups.length === 0 && (
-            <div className="col-span-full py-12 text-center text-muted-foreground bg-muted/10 rounded-lg border border-dashed border-border/50">
-              <p>Nenhum grupo cadastrado nesta instância.</p>
-              <Button variant="link" onClick={() => setIsModalOpen(true)}>Clique aqui para adicionar seu primeiro grupo</Button>
-            </div>
-          )}
-        </div>
-      </div>
-      )}
-
-      {/* Mass Paste Dialog */}
-      <Dialog open={isMassPasteModalOpen} onOpenChange={setIsMassPasteModalOpen}>
-        <DialogContent className="sm:max-w-[600px] w-[95vw] max-h-[90vh] overflow-y-auto rounded-xl">
-          <DialogHeader>
-            <DialogTitle>Colar Agendamentos em Massa</DialogTitle>
-            <DialogDescription>
-              Cole o JSON copiado de outro grupo e selecione os grupos de destino.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>JSON dos Agendamentos</Label>
-              <Textarea 
-                value={massPasteText} 
-                onChange={e => {
-                  setMassPasteText(e.target.value)
-                  setMassPasteError(validatePastedJSON(e.target.value))
-                }} 
-                rows={4} 
-                className={massPasteError ? "border-red-500" : ""}
-                placeholder="[{...}]"
-              />
-              {massPasteError && <p className="text-xs text-red-500 font-medium">{massPasteError}</p>}
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Buscar Grupo</Label>
-              <Input placeholder="Filtrar por nome..." value={searchTermPaste} onChange={e => setSearchTermPaste(e.target.value)} />
-            </div>
-            
-            <div className="space-y-2 pt-2">
-              <Label>Grupos de destino</Label>
-              <SeletorDeGrupos
-                grupos={filteredGroups}
-                selecionados={selectedGroupsForPaste}
-                onChange={setSelectedGroupsForPaste}
-                instanceName={selectedInstance}
-                altura="max-h-[300px]"
-              />
-            </div>
-            
-            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
-              <Button variant="secondary" onClick={() => setIsMassPasteModalOpen(false)} className="w-full sm:w-auto" disabled={isPasting}>Cancelar</Button>
-              <Button 
-                onClick={handleMassPasteSubmit} 
-                className="w-full sm:w-auto" 
-                disabled={!!massPasteError || selectedGroupsForPaste.length === 0 || isPasting}
-              >
-                {isPasting ? 'Agendando...' : `Agendar em ${selectedGroupsForPaste.length} grupo(s)`}
-              </Button>
-            </DialogFooter>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Mass Create Dialog */}
-      <Dialog open={isMassCreateModalOpen} onOpenChange={setIsMassCreateModalOpen}>
-        <DialogContent className="sm:max-w-[550px] w-[95vw] max-h-[85vh] overflow-y-auto rounded-xl">
-          <DialogHeader>
-            <DialogTitle>Criar Agendamento em Massa</DialogTitle>
-            <DialogDescription>
-              Crie uma mensagem nova e selecione em quais grupos deseja agendá-la.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleMassCreateSubmit} className="space-y-4 pt-4">
-            <div className="space-y-1.5">
-              <Label>Nome da Campanha (Opcional — agrupa métricas e permite pausar/adiar em lote)</Label>
-              <Input
-                placeholder="Ex: Black Friday, Oferta Relâmpago, Aquecimento..."
-                value={campanhaMassa}
-                onChange={e => setCampanhaMassa(e.target.value)}
-              />
             </div>
 
-            {newSchedules.map((schedule, index) => (
-              <div key={index} className="space-y-4 border border-border/60 p-4 rounded-xl bg-card relative mb-6">
-                {newSchedules.length > 1 && (
-                  <Button type="button" variant="ghost" size="sm" className="absolute top-2 right-2 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setNewSchedules(newSchedules.filter((_, i) => i !== index))}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-                <div className="space-y-2 pr-8">
-                  <Label>Tipo de Mensagem {index + 1}</Label>
-                  <Select value={schedule.type} onValueChange={v => updateSchedule(index, { type: v })}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o tipo..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="text">Texto Simples</SelectItem>
-                      <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, Doc)</SelectItem>
-                      <SelectItem value="button">Botões (Interativo)</SelectItem>
-                      <SelectItem value="poll">Enquete</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <InserirVariavel
-                  compact
-                  onInsert={token => {
-                    if (schedule.type === 'text') {
-                      updateSchedule(index, { text: (schedule.text || '') + token })
-                    } else if (schedule.type === 'media') {
-                      updateSchedule(index, { caption: (schedule.caption || '') + token })
-                    } else if (schedule.type === 'button') {
-                      updateSchedule(index, { description: (schedule.description || '') + token })
-                    } else if (schedule.type === 'poll') {
-                      updateSchedule(index, { pollName: (schedule.pollName || '') + token })
-                    }
-                  }}
-                />
-
-                {schedule.type === 'text' && (
-                  <div className="space-y-2">
-                    <Label>Mensagem</Label>
-                    <Textarea required placeholder="Digite sua mensagem aqui..." value={schedule.text} onChange={e => updateSchedule(index, { text: e.target.value })} rows={5} className="resize-none" />
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-4 pt-1">
-                  {(schedule.type === 'text' || schedule.type === 'media') && (
-                    <label className="flex items-center gap-2 text-xs cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="rounded border-gray-300 text-primary focus:ring-primary"
-                        checked={schedule.trackLinks !== false}
-                        onChange={e => updateSchedule(index, { trackLinks: e.target.checked })}
-                      />
-                      <span>Rastrear cliques nos links (/l/ + ?grupid=)</span>
-                    </label>
-                  )}
-                  <label className="flex items-center gap-2 text-xs cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded border-gray-300 text-primary focus:ring-primary"
-                      checked={Boolean(schedule.mentionAll)}
-                      onChange={e => updateSchedule(index, { mentionAll: e.target.checked })}
-                    />
-                    <span>Marcar todos do grupo (mentionAll)</span>
-                  </label>
-                </div>
-
-                {schedule.type === 'media' && (
-                  <div 
-                    className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10 transition-colors"
-                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('bg-primary/10', 'border-primary') }}
-                    onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('bg-primary/10', 'border-primary') }}
-                    onDrop={async (e) => {
-                      e.preventDefault();
-                      e.currentTarget.classList.remove('bg-primary/10', 'border-primary');
-                      const file = e.dataTransfer.files?.[0];
-                      if(!file) return;
-                      setIsUploading(true);
-                      setUploadError('');
-                      const fd = new FormData(); fd.append('file', file);
-                      try {
-                        const res = await fetch('/api/upload', {method:'POST', body:fd});
-                        const data = await res.json();
-                        if (res.ok && data.success) {
-                          updateSchedule(index, { mediaUrl: data.url });
-                        } else {
-                          setUploadError(data.error || 'Erro no servidor ao realizar upload.');
-                        }
-                      } catch(err: any) {
-                        setUploadError(err.message || 'Erro na conexão.');
-                      } finally {
-                        setIsUploading(false);
-                      }
-                    }}
-                  >
-                    <div className="space-y-2">
-                      <Label>Tipo de Mídia</Label>
-                      <Select value={schedule.mediatype} onValueChange={v => updateSchedule(index, { mediatype: v })}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Tipo de mídia..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="image">Imagem</SelectItem>
-                          <SelectItem value="video">Vídeo</SelectItem>
-                          <SelectItem value="audio">Áudio</SelectItem>
-                          <SelectItem value="document">Documento PDF/ZIP</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label>URL da Mídia ou Upload</Label>
-                      <div className="flex gap-2">
-                        <Input required placeholder="https://..." value={schedule.mediaUrl} onChange={e => updateSchedule(index, { mediaUrl: e.target.value })} />
-                        <input type="file" id={`mediaUploadMass-${index}`} className="hidden" onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if(!file) return;
-                          
-                          setIsUploading(true);
-                          setUploadError('');
-                          
-                          const fd = new FormData(); fd.append('file', file);
-                          try {
-                            const res = await fetch('/api/upload', {method:'POST', body:fd});
-                            const data = await res.json();
-                            if (res.ok && data.success) {
-                              updateSchedule(index, { mediaUrl: data.url });
-                            } else {
-                              setUploadError(data.error || 'Erro interno no servidor ao realizar upload.');
-                            }
-                          } catch(err: any) {
-                            setUploadError(err.message || 'Erro na conexão de upload');
-                          } finally {
-                            setIsUploading(false);
-                          }
-                        }}/>
-                        <Button type="button" variant="secondary" onClick={() => document.getElementById(`mediaUploadMass-${index}`)?.click()} disabled={isUploading}>
-                          {isUploading ? <span className="text-xs">⏳</span> : <Upload className="w-4 h-4" />}
-                        </Button>
-                      </div>
-                      {uploadError && <p className="text-xs text-red-500 mt-1">{uploadError}</p>}
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Legenda (Opcional)</Label>
-                      <Textarea placeholder="Legenda da mídia..." value={schedule.caption} onChange={e => updateSchedule(index, { caption: e.target.value })} rows={2} />
-                    </div>
-
-                    {schedule.mediatype === 'document' && (
-                      <div className="space-y-2">
-                        <Label>Nome do Arquivo (Obrigatório)</Label>
-                        <Input required placeholder="relatorio_final.pdf" value={schedule.fileName} onChange={e => updateSchedule(index, { fileName: e.target.value })} />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {schedule.type === 'button' && (
-                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
-                    <div className="space-y-2">
-                      <Label>Título Principal</Label>
-                      <Input required placeholder="Ex: Oferta Especial!" value={schedule.title} onChange={e => updateSchedule(index, { title: e.target.value })} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Descrição</Label>
-                      <Textarea required placeholder="Detalhes da oferta..." value={schedule.description} onChange={e => updateSchedule(index, { description: e.target.value })} rows={2} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Rodapé (Opcional)</Label>
-                      <Input placeholder="Válido até amanhã" value={schedule.footer} onChange={e => updateSchedule(index, { footer: e.target.value })} />
-                    </div>
-                    
-                    {/* Midia Opcional */}
-                    {!schedule.buttonsList.some((b:any)=>b.type!=='reply') && (
-                      <div className="p-3 border border-border bg-background rounded-lg space-y-3">
-                        <Label className="text-xs text-muted-foreground font-semibold">Anexar Mídia (Opcional)</Label>
-                        <div className="flex gap-2">
-                          <Select value={schedule.mediatype} onValueChange={v => updateSchedule(index, { mediatype: v })}>
-                            <SelectTrigger className="w-[120px]">
-                              <SelectValue placeholder="Mídia..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="image">Imagem</SelectItem>
-                              <SelectItem value="video">Vídeo</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Input placeholder="URL da Mídia" value={schedule.mediaUrl} onChange={e => updateSchedule(index, { mediaUrl: e.target.value })} />
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="pt-2 space-y-3">
-                      <Label className="font-semibold text-sm">Botões (Max 3)</Label>
-                      {schedule.buttonsList.map((btn: any, btnIndex: number) => (
-                        <div key={btnIndex} className="p-3 border border-border/50 bg-background rounded-lg space-y-3 relative group">
-                          <div className="flex justify-between items-center">
-                            <Select value={btn.type} onValueChange={v => {
-                              const list = [...schedule.buttonsList];
-                              list[btnIndex] = {...btn, type: v};
-                              updateSchedule(index, { buttonsList: list });
-                            }}>
-                              <SelectTrigger className="w-[160px] h-8 border-none bg-transparent text-primary hover:bg-muted/50 font-medium focus:ring-0 px-2">
-                                <SelectValue placeholder="Tipo..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="reply">Resposta Rápida</SelectItem>
-                                <SelectItem value="url">Link Externo</SelectItem>
-                                <SelectItem value="call">Ligar</SelectItem>
-                                <SelectItem value="copy">Copiar Texto</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {schedule.buttonsList.length > 1 && (
-                              <button type="button" onClick={() => {
-                                const list = schedule.buttonsList.filter((_,i) => i!==btnIndex);
-                                updateSchedule(index, { buttonsList: list });
-                              }} className="text-destructive opacity-50 hover:opacity-100 transition-opacity">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                          
-                          <Input required placeholder="Texto do botão (ex: Comprar)" value={btn.displayText||''} onChange={e => {
-                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, displayText: e.target.value}; updateSchedule(index, { buttonsList: list });
-                          }} className="h-8" />
-                          
-                          {btn.type === 'reply' && <Input required placeholder="ID interno (ex: btn_comprar)" value={btn.id||''} onChange={e => {
-                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, id: e.target.value}; updateSchedule(index, { buttonsList: list });
-                          }} className="h-8" />}
-                          
-                          {btn.type === 'url' && <Input required placeholder="https://..." value={btn.url||''} onChange={e => {
-                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, url: e.target.value}; updateSchedule(index, { buttonsList: list });
-                          }} className="h-8" />}
-                          
-                          {btn.type === 'call' && <Input required placeholder="+5511999999999" value={btn.phoneNumber||''} onChange={e => {
-                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, phoneNumber: e.target.value}; updateSchedule(index, { buttonsList: list });
-                          }} className="h-8" />}
-                          
-                          {btn.type === 'copy' && <Input required placeholder="Texto para copiar..." value={btn.copyCode||''} onChange={e => {
-                            const list = [...schedule.buttonsList]; list[btnIndex] = {...btn, copyCode: e.target.value}; updateSchedule(index, { buttonsList: list });
-                          }} className="h-8" />}
-                        </div>
-                      ))}
-                      {schedule.buttonsList.length < 3 && (
-                        <Button type="button" variant="secondary" size="sm" className="w-full border-dashed" onClick={() => {
-                          updateSchedule(index, { buttonsList: [...schedule.buttonsList, {type:'reply', displayText:'', id:'btn'+Date.now()}] });
-                        }}>+ Adicionar Botão</Button>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {schedule.type === 'poll' && (
-                  <div className="space-y-4 border border-border/50 p-4 rounded-lg bg-muted/10">
-                    <div className="space-y-2">
-                      <Label>Pergunta da Enquete</Label>
-                      <Input required placeholder="Ex: Qual o melhor horário?" value={schedule.pollName} onChange={e => updateSchedule(index, { pollName: e.target.value })} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Opções (Separadas por vírgula)</Label>
-                      <Input required placeholder="Manhã, Tarde, Noite" value={schedule.pollOptions} onChange={e => updateSchedule(index, { pollOptions: e.target.value })} />
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2 pt-2 border-t border-border/50 flex flex-col">
-                  <Label>Data e Hora do Envio</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant={"outline"}
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !schedule.scheduledAt && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarDays className="mr-2 h-4 w-4" />
-                        {schedule.scheduledAt ? (
-                          new Date(schedule.scheduledAt).toLocaleString('pt-BR', { dateStyle: 'long', timeStyle: 'short' })
-                        ) : (
-                          <span>Escolha uma data e horário</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[95vw] sm:w-auto p-0 max-h-[85vh] overflow-y-auto rounded-xl" align="center">
-                      <Calendar
-                        mode="single"
-                        selected={schedule.scheduledAt ? new Date(schedule.scheduledAt) : undefined}
-                        onSelect={(d) => {
-                          if (d) {
-                             const current = schedule.scheduledAt ? new Date(schedule.scheduledAt) : new Date();
-                             d.setHours(current.getHours());
-                             d.setMinutes(current.getMinutes());
-                             const tzOffset = d.getTimezoneOffset() * 60000;
-                             const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
-                             updateSchedule(index, { scheduledAt: localISOTime });
-                          }
-                        }}
-                      />
-                      <div className="p-4 border-t border-border flex flex-col items-center justify-center gap-3 bg-muted/20">
-                        <Label className="text-sm font-semibold w-full text-center text-muted-foreground">Selecione o Horário</Label>
-                        <div className="flex items-center gap-4">
-                          <ScrollDial 
-                            max={23} 
-                            value={schedule.scheduledAt ? parseInt(schedule.scheduledAt.split('T')[1]?.split(':')[0] || '12', 10) : 12}
-                            onChange={(h) => {
-                              let m = schedule.scheduledAt ? schedule.scheduledAt.split('T')[1]?.split(':')[1] : '00';
-                              if (!m) m = '00';
-                              
-                              let localDate = schedule.scheduledAt ? schedule.scheduledAt.split('T')[0] : '';
-                              if (!localDate) {
-                                const today = new Date();
-                                const tzOffset = today.getTimezoneOffset() * 60000;
-                                localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
-                              }
-                              
-                              updateSchedule(index, { scheduledAt: `${localDate}T${h.toString().padStart(2, '0')}:${m}` });
-                            }}
-                          />
-                          <span className="text-2xl font-bold text-muted-foreground/50">:</span>
-                          <ScrollDial 
-                            max={59} 
-                            value={schedule.scheduledAt ? parseInt(schedule.scheduledAt.split('T')[1]?.split(':')[1] || '0', 10) : 0}
-                            onChange={(m) => {
-                              let h = schedule.scheduledAt ? schedule.scheduledAt.split('T')[1]?.split(':')[0] : '12';
-                              if (!h) h = '12';
-                              
-                              let localDate = schedule.scheduledAt ? schedule.scheduledAt.split('T')[0] : '';
-                              if (!localDate) {
-                                const today = new Date();
-                                const tzOffset = today.getTimezoneOffset() * 60000;
-                                localDate = new Date(today.getTime() - tzOffset).toISOString().split('T')[0];
-                              }
-                              
-                              updateSchedule(index, { scheduledAt: `${localDate}T${h}:${m.toString().padStart(2, '0')}` });
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            ))}
-            
+            {/* Busca e filtro por tags */}
             <div className="flex flex-col sm:flex-row gap-2">
-              <Button type="button" variant="outline" className="w-full border-dashed flex-1" onClick={() => setNewSchedules([...newSchedules, getEmptySchedule()])}>
-                <Plus className="w-4 h-4 mr-2" /> Adicionar Outra Mensagem
-              </Button>
-              <Button type="button" variant="outline" className="w-full border-dashed flex-1 text-primary hover:text-primary hover:bg-primary/10 border-primary/50" onClick={handlePasteIntoCreate}>
-                <ClipboardPaste className="w-4 h-4 mr-2" /> Colar JSON (Área de Transf.)
-              </Button>
-            </div>
-
-            <div className="space-y-2 pt-2">
-              <Label>Grupos de destino</Label>
-              <SeletorDeGrupos
-                grupos={filteredGroups}
-                selecionados={selectedGroupsForCreate}
-                onChange={setSelectedGroupsForCreate}
-                instanceName={selectedInstance}
-                altura="max-h-[300px]"
-              />
-            </div>
-
-            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
-              <Button type="button" variant="secondary" onClick={() => setIsMassCreateModalOpen(false)} className="w-full sm:w-auto" disabled={isCreating}>Cancelar</Button>
-              <Button type="submit" className="w-full sm:w-auto" disabled={selectedGroupsForCreate.length === 0 || isCreating}>
-                {isCreating ? 'Agendando...' : `Criar ${newSchedules.length} agendamento(s) em ${selectedGroupsForCreate.length} grupo(s)`}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Group Dialog */}
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto rounded-xl">
-          <DialogHeader>
-            <DialogTitle>Adicionar Grupo</DialogTitle>
-            <DialogDescription>
-              Insira os dados do grupo que deseja monitorar.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateGroup} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Nome do Grupo</Label>
-              <Input required placeholder="Ex: Comunidade VIP" value={newGroup.name} onChange={e => setNewGroup({...newGroup, name: e.target.value})} />
-            </div>
-            <div className="space-y-2">
-              <Label>Slug (URL amigável)</Label>
-              <Input required placeholder="comunidade-vip" value={newGroup.slug} onChange={e => setNewGroup({...newGroup, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')})} />
-            </div>
-            <div className="space-y-2">
-              <Label>Descrição (Opcional)</Label>
-              <Input placeholder="Descrição breve..." value={newGroup.description} onChange={e => setNewGroup({...newGroup, description: e.target.value})} />
-            </div>
-            <div className="space-y-2">
-              <Label>Participante (DDI + DDD + Num)</Label>
-              <Input required placeholder="Ex: 5511999999999" value={newGroup.participants} onChange={e => setNewGroup({...newGroup, participants: e.target.value.replace(/\D/g, '')})} />
-            </div>
-            <div className="space-y-2">
-              <Label>Nome da Instância</Label>
-              <Input required readOnly className="bg-muted" value={newGroup.instanceName} onChange={e => setNewGroup({...newGroup, instanceName: e.target.value})} />
-            </div>
-            
-            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
-              <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
-              <Button type="submit" className="w-full sm:w-auto">Salvar Grupo</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* QR Code Dialog */}
-      <Dialog open={isQrModalOpen} onOpenChange={setIsQrModalOpen}>
-        <DialogContent className="sm:max-w-[400px] w-[95vw] max-h-[90vh] overflow-y-auto rounded-xl">
-          <DialogHeader>
-            <DialogTitle className="text-center">Conectar WhatsApp</DialogTitle>
-            <DialogDescription className="text-center">
-              Abra o WhatsApp, vá em "Aparelhos Conectados" e escaneie o código abaixo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center justify-center py-6">
-            {qrCodeBase64 ? (
-              <div className="bg-white p-4 rounded-xl shadow-lg">
-                <img src={qrCodeBase64.startsWith('data:image') ? qrCodeBase64 : `data:image/png;base64,${qrCodeBase64}`} alt="QR Code" className="w-64 h-64" />
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Buscar grupo pelo nome ou descrição…"
+                  value={buscaGrupos}
+                  onChange={(e) => setBuscaGrupos(e.target.value)}
+                  className="pl-9"
+                />
               </div>
-            ) : (
-              <div className="w-64 h-64 bg-muted animate-pulse rounded-xl flex items-center justify-center">
-                <span className="text-muted-foreground text-sm">Gerando QR Code...</span>
-              </div>
-            )}
-          </div>
-          <DialogFooter className="flex-col sm:flex-row sm:justify-center gap-2">
-            <Button variant="outline" onClick={() => { setQrCodeBase64(''); handleOpenQrCode(); }} className="w-full sm:w-auto">
-              <RefreshCcw className="w-4 h-4 mr-2" />
-              Atualizar
-            </Button>
-            <Button variant="secondary" onClick={() => setIsQrModalOpen(false)} className="w-full sm:w-auto">Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Add Instance Dialog */}
-      <Dialog open={isInstanceModalOpen} onOpenChange={setIsInstanceModalOpen}>
-        <DialogContent className="sm:max-w-[425px] w-[95vw] max-h-[90vh] overflow-y-auto rounded-xl">
-          <DialogHeader>
-            <DialogTitle>Nova Instância (Evolution API)</DialogTitle>
-            <DialogDescription>
-              Crie uma nova instância para conectar um número de WhatsApp.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleCreateInstance} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Nome da Instância</Label>
-              <Input required placeholder="Ex: suporte_1" value={newInstance.instanceName} onChange={e => setNewInstance({...newInstance, instanceName: e.target.value})} />
-            </div>
-            
-            <div className="p-4 border border-border/50 bg-muted/10 rounded-lg space-y-4">
-              <Label className="text-sm font-semibold text-muted-foreground">Configuração de Proxy (Opcional)</Label>
-              
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label className="text-xs">Host</Label>
-                  <Input placeholder="ip_ou_dominio" value={newInstance.proxyHost} onChange={e => setNewInstance({...newInstance, proxyHost: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Porta</Label>
-                  <Input placeholder="80" type="number" value={newInstance.proxyPort} onChange={e => setNewInstance({...newInstance, proxyPort: e.target.value})} />
-                </div>
-              </div>
-              
-              <div className="space-y-2">
-                <Label className="text-xs">Protocolo</Label>
-                <Select value={newInstance.proxyProtocol} onValueChange={v => setNewInstance({...newInstance, proxyProtocol: v})}>
-                  <SelectTrigger><SelectValue placeholder="http" /></SelectTrigger>
+              {tagsDoPainel.length > 0 && (
+                <Select value={tagFiltro} onValueChange={setTagFiltro}>
+                  <SelectTrigger className="w-full sm:w-[200px]">
+                    <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+                    <SelectValue placeholder="Todas as tags" />
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="http">HTTP</SelectItem>
-                    <SelectItem value="https">HTTPS</SelectItem>
-                    <SelectItem value="socks5">SOCKS5</SelectItem>
+                    <SelectItem value="todas">Todas as tags</SelectItem>
+                    <SelectItem value="sem_tag">Sem tag</SelectItem>
+                    {tagsDoPainel.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: t.color || '#6366f1' }}
+                          />
+                          {t.name}
+                        </span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-              </div>
+              )}
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <Label className="text-xs">Usuário</Label>
-                  <Input placeholder="opcional" value={newInstance.proxyUsername} onChange={e => setNewInstance({...newInstance, proxyUsername: e.target.value})} />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs">Senha</Label>
-                  <Input type="password" placeholder="opcional" value={newInstance.proxyPassword} onChange={e => setNewInstance({...newInstance, proxyPassword: e.target.value})} />
-                </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={handleSyncGroups}
+                  className="flex-1 sm:flex-none"
+                >
+                  <RefreshCcw className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Sincronizar</span>
+                </Button>
+
+                <Button
+                  onClick={() => setIsModalOpen(true)}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Plus className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Novo grupo</span>
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" title="Mais ações">
+                      <MoreHorizontal className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-60">
+                    <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setModoSelecao(!modoSelecao)
+                        setSelecionados([])
+                      }}
+                    >
+                      <PencilRuler className="w-4 h-4 mr-2" />
+                      {modoSelecao
+                        ? 'Cancelar seleção'
+                        : 'Editar nome, foto e descrição'}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleMassCreateClick}>
+                      <Edit className="w-4 h-4 mr-2" />
+                      Agendar em massa
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleMassPasteClick}>
+                      <ClipboardPaste className="w-4 h-4 mr-2" />
+                      Colar agendamentos (JSON)
+                    </DropdownMenuItem>
+
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>Instância</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={handleOpenQrCode}>
+                      <QrCode className="w-4 h-4 mr-2" />
+                      QR Code de conexão
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
+                      <Plus className="w-4 h-4 mr-2" />
+                      Nova instância
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
+          </div>
 
-            <DialogFooter className="pt-4 flex-col sm:flex-row gap-2">
-              <Button type="button" variant="secondary" onClick={() => setIsInstanceModalOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
-              <Button type="submit" className="w-full sm:w-auto">Criar Instância</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+          {modoSelecao && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setSelecionados(
+                      selecionados.length === filteredGroups.length
+                        ? []
+                        : filteredGroups.map((g: any) => g.id)
+                    )
+                  }
+                >
+                  {selecionados.length === filteredGroups.length &&
+                  filteredGroups.length > 0 ? (
+                    <CheckSquare className="w-4 h-4 mr-2" />
+                  ) : (
+                    <Square className="w-4 h-4 mr-2" />
+                  )}
+                  {selecionados.length === filteredGroups.length &&
+                  filteredGroups.length > 0
+                    ? 'Desmarcar todos'
+                    : 'Marcar todos'}
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  {selecionados.length} grupo(s) selecionado(s)
+                </span>
+
+                {tagsDoPainel.map((t) => {
+                  const idsAqui = t.grupos
+                    .map((g: any) => g.id)
+                    .filter((id: string) => filteredGroups.some((fg: any) => fg.id === id))
+                  if (idsAqui.length === 0) return null
+                  const todosJa = idsAqui.every((id: string) =>
+                    selecionados.includes(id)
+                  )
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() =>
+                        setSelecionados(
+                          todosJa
+                            ? selecionados.filter((id) => !idsAqui.includes(id))
+                            : Array.from(new Set([...selecionados, ...idsAqui]))
+                        )
+                      }
+                      className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                        todosJa
+                          ? 'border-transparent text-white'
+                          : 'border-border/60 bg-muted/20 hover:bg-muted/40'
+                      }`}
+                      style={todosJa ? { backgroundColor: t.color } : undefined}
+                      title={`Marcar os ${idsAqui.length} grupo(s) da tag ${t.name}`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full"
+                        style={{
+                          backgroundColor: todosJa
+                            ? 'rgba(255,255,255,.85)'
+                            : t.color,
+                        }}
+                      />
+                      {t.name}
+                      <span className="opacity-70">{idsAqui.length}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <Button
+                disabled={selecionados.length === 0}
+                onClick={() => setBulkAberto(true)}
+              >
+                <PencilRuler className="w-4 h-4 mr-2" />
+                Editar selecionados
+              </Button>
+            </div>
+          )}
+
+          {/* Grid de Cards dos Grupos */}
+          <GroupCardGrid
+            filteredGroups={filteredGroups}
+            modoSelecao={modoSelecao}
+            selecionados={selecionados}
+            setSelecionados={setSelecionados}
+            onOpenNewGroup={() => setIsModalOpen(true)}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* 4. Modais padronizados com Header, Body e Footer fixos */}
+      <MassPasteModal
+        open={isMassPasteModalOpen}
+        onOpenChange={setIsMassPasteModalOpen}
+        filteredGroups={filteredGroups}
+        selectedInstance={selectedInstance}
+        massPasteText={massPasteText}
+        setMassPasteText={setMassPasteText}
+        massPasteError={massPasteError}
+        setMassPasteError={setMassPasteError}
+        validatePastedJSON={validatePastedJSON}
+        selectedGroupsForPaste={selectedGroupsForPaste}
+        setSelectedGroupsForPaste={setSelectedGroupsForPaste}
+        searchTermPaste={searchTermPaste}
+        setSearchTermPaste={setSearchTermPaste}
+        isPasting={isPasting}
+        onSubmit={handleMassPasteSubmit}
+      />
+
+      <MassCreateModal
+        open={isMassCreateModalOpen}
+        onOpenChange={setIsMassCreateModalOpen}
+        filteredGroups={filteredGroups}
+        selectedInstance={selectedInstance}
+        selectedGroupsForCreate={selectedGroupsForCreate}
+        setSelectedGroupsForCreate={setSelectedGroupsForCreate}
+        campanhaMassa={campanhaMassa}
+        setCampanhaMassa={setCampanhaMassa}
+        newSchedules={newSchedules}
+        setNewSchedules={setNewSchedules}
+        updateSchedule={updateSchedule}
+        getEmptySchedule={getEmptySchedule}
+        isCreating={isCreating}
+        isUploading={isUploading}
+        setIsUploading={setIsUploading}
+        uploadError={uploadError}
+        setUploadError={setUploadError}
+        onSubmit={handleMassCreateSubmit}
+        onPasteIntoCreate={handlePasteIntoCreate}
+      />
+
+      <NewGroupModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        newGroup={newGroup}
+        setNewGroup={setNewGroup}
+        onSubmit={handleCreateGroup}
+      />
+
+      <QrCodeModal
+        open={isQrModalOpen}
+        onOpenChange={setIsQrModalOpen}
+        qrCodeBase64={qrCodeBase64}
+        onRefresh={() => {
+          setQrCodeBase64('')
+          handleOpenQrCode()
+        }}
+      />
+
+      <NewInstanceModal
+        open={isInstanceModalOpen}
+        onOpenChange={setIsInstanceModalOpen}
+        newInstance={newInstance}
+        setNewInstance={setNewInstance}
+        onSubmit={handleCreateInstance}
+      />
 
       {/* Bulk Edit Modal */}
       <BulkEditModal
@@ -1629,10 +1015,4 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
       />
     </div>
   )
-}
-
-/** No modo de seleção o card não navega — só marca e desmarca. */
-function ConditionalLink({ href, desativado, children }: { href: string; desativado: boolean; children: React.ReactNode }) {
-  if (desativado) return <>{children}</>
-  return <Link href={href}>{children}</Link>
 }

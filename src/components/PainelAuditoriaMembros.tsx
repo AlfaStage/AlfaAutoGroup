@@ -5,6 +5,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   ShieldCheck,
   AlertTriangle,
@@ -27,6 +38,8 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
   const [processandoPhone, setProcessandoPhone] = useState<string | null>(null)
   const [processandoLote, setProcessandoLote] = useState(false)
   const [mensagem, setMensagem] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
+  const [confirmacaoLimpezaLote, setConfirmacaoLimpezaLote] = useState<{ count: number; items: any[] } | null>(null)
+
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -118,7 +131,7 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
     }
   }
 
-  const limparLoteMesmaTagSeguro = async () => {
+  const limparLoteMesmaTagSeguro = () => {
     if (!dados?.duplicados) return
     // Seleciona apenas duplicados da mesma tag que NÃO são suspeitos de equipe (possibleTeam === false)
     const seguros = dados.duplicados.filter((d: any) => d.mesmaTag && !d.possibleTeam).slice(0, 25)
@@ -130,23 +143,24 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
       return
     }
 
-    if (
-      !window.confirm(
-        `Remover ${seguros.length} lead(s) duplicados dos grupos antigos da mesma tag (mantendo cada um no grupo mais recente)? Admins e possíveis membros de equipe estão protegidos.`
-      )
-    ) {
-      return
-    }
+    const items = seguros.map((item: any) => ({
+      phone: item.phone,
+      removeGroupIds: (item.grupos || [])
+        .map((g: any) => g.groupId)
+        .filter((gid: string) => gid !== item.sugestaoManterGroupId)
+    }))
+
+    setConfirmacaoLimpezaLote({ count: seguros.length, items })
+  }
+
+  const executarLimpezaLote = async () => {
+    if (!confirmacaoLimpezaLote) return
+    const { items } = confirmacaoLimpezaLote
+    setConfirmacaoLimpezaLote(null)
 
     setProcessandoLote(true)
     setMensagem(null)
     try {
-      const items = seguros.map((item: any) => ({
-        phone: item.phone,
-        removeGroupIds: (item.grupos || [])
-          .map((g: any) => g.groupId)
-          .filter((gid: string) => gid !== item.sugestaoManterGroupId)
-      }))
       const res = await fetch('/api/members/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,6 +173,8 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
           texto: `Limpeza concluída: ${d.removidos} vaga(s) liberada(s) nos grupos antigos.`
         })
         await carregar()
+      } else {
+        setMensagem({ tipo: 'erro', texto: d.error || 'Falha ao processar limpeza.' })
       }
     } finally {
       setProcessandoLote(false)
@@ -256,32 +272,19 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
 
       {/* Navegação de Abas da Auditoria */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={aba === 'duplicados' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setAba('duplicados')}
-            className="gap-1.5"
-          >
-            <Users className="w-4 h-4" /> Duplicados ({k.leadsDuplicados || 0})
-          </Button>
-          <Button
-            variant={aba === 'equipe' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setAba('equipe')}
-            className="gap-1.5"
-          >
-            <ShieldCheck className="w-4 h-4" /> Equipe Protegida ({(dados.teamWhitelist || []).length})
-          </Button>
-          <Button
-            variant={aba === 'ddd' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setAba('ddd')}
-            className="gap-1.5"
-          >
-            <MapPin className="w-4 h-4" /> Mapa de DDDs ({(dados.mapaDDD || []).length})
-          </Button>
-        </div>
+        <Tabs value={aba} onValueChange={(val) => setAba(val as 'duplicados' | 'equipe' | 'ddd')}>
+          <TabsList className="bg-muted/40 p-1 border border-border/40 flex flex-wrap h-auto gap-1">
+            <TabsTrigger value="duplicados" className="gap-1.5 text-xs sm:text-sm">
+              <Users className="w-4 h-4" /> Duplicados ({k.leadsDuplicados || 0})
+            </TabsTrigger>
+            <TabsTrigger value="equipe" className="gap-1.5 text-xs sm:text-sm">
+              <ShieldCheck className="w-4 h-4" /> Equipe Protegida ({(dados.teamWhitelist || []).length})
+            </TabsTrigger>
+            <TabsTrigger value="ddd" className="gap-1.5 text-xs sm:text-sm">
+              <MapPin className="w-4 h-4" /> Mapa de DDDs ({(dados.mapaDDD || []).length})
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <Button variant="outline" size="sm" onClick={carregar} disabled={carregando} className="gap-1.5">
           <RefreshCw className={`w-3.5 h-3.5 ${carregando ? 'animate-spin' : ''}`} /> Atualizar Auditoria
@@ -558,9 +561,31 @@ export default function PainelAuditoriaMembros({ tagId }: { tagId?: string }) {
                 )}
               </div>
             ))}
-          </CardContent>
-        </Card>
+        </CardContent>
+      </Card>
       )}
+
+      {/* Confirmação de Limpeza de Duplicados em Lote */}
+      <AlertDialog open={!!confirmacaoLimpezaLote} onOpenChange={(open) => !open && setConfirmacaoLimpezaLote(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover Membros Duplicados</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deseja remover {confirmacaoLimpezaLote?.count} lead(s) duplicados dos grupos antigos da mesma tag (mantendo cada um no grupo mais recente)? Administradores e membros de equipe protegidos não serão afetados.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmacaoLimpezaLote(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={executarLimpezaLote}
+            >
+              Executar Limpeza
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
+

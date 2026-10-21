@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   CheckCircle2, AlertCircle, SkipForward, MousePointerClick, UserPlus, UserMinus,
   MessageSquare, Settings2, Loader2, ChevronRight, BarChart3, Bell, Send
@@ -543,27 +544,29 @@ function ConfiguracaoAlertas() {
           )}
         </div>
 
-        <div className="flex flex-wrap gap-4">
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              className="rounded border-gray-300 text-primary focus:ring-primary"
+        <div className="flex flex-wrap gap-6 pt-2">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="switch-alerts"
               checked={config.alertsEnabled}
               disabled={salvando}
-              onChange={e => gravar({ alertsEnabled: e.target.checked })}
+              onCheckedChange={checked => gravar({ alertsEnabled: checked })}
             />
-            Avisar quando um agendamento falhar
-          </label>
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              className="rounded border-gray-300 text-primary focus:ring-primary"
+            <Label htmlFor="switch-alerts" className="text-sm cursor-pointer font-normal">
+              Avisar quando um agendamento falhar
+            </Label>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch
+              id="switch-daily"
               checked={config.dailyReportEnabled}
               disabled={salvando}
-              onChange={e => gravar({ dailyReportEnabled: e.target.checked })}
+              onCheckedChange={checked => gravar({ dailyReportEnabled: checked })}
             />
-            Enviar o relatório diário às 23:59
-          </label>
+            <Label htmlFor="switch-daily" className="text-sm cursor-pointer font-normal">
+              Enviar o relatório diário às 23:59
+            </Label>
+          </div>
         </div>
 
         {aviso && <p className="text-xs text-muted-foreground flex items-center gap-1"><Send className="w-3 h-3" /> {aviso}</p>}

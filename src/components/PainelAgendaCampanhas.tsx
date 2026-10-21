@@ -6,6 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   CalendarClock,
   PauseCircle,
   PlayCircle,
@@ -35,6 +45,12 @@ export default function PainelAgendaCampanhas({
   const [statusFiltro, setStatusFiltro] = useState('todos')
   const [executandoAcao, setExecutandoAcao] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [confirmacaoFila, setConfirmacaoFila] = useState<{
+    action: 'pause' | 'resume' | 'delay'
+    minutes?: number
+    mensagem: string
+  } | null>(null)
+
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -56,7 +72,7 @@ export default function PainelAgendaCampanhas({
     carregar()
   }, [carregar])
 
-  const controlarFila = async (action: 'pause' | 'resume' | 'delay', minutes?: number) => {
+  const solicitarControleFila = (action: 'pause' | 'resume' | 'delay', minutes?: number) => {
     const escopo =
       campFiltro !== 'todas'
         ? `da campanha "${campFiltro}"`
@@ -73,7 +89,13 @@ export default function PainelAgendaCampanhas({
           ? `Retomar os agendamentos pausados ${escopo} (com espaçamento automático seguro)?`
           : `Adiar em +${minutes} minutos os agendamentos pendentes ${escopo}?`
 
-    if (!window.confirm(msgConfirm)) return
+    setConfirmacaoFila({ action, minutes, mensagem: msgConfirm })
+  }
+
+  const executarControleFila = async () => {
+    if (!confirmacaoFila) return
+    const { action, minutes } = confirmacaoFila
+    setConfirmacaoFila(null)
 
     setExecutandoAcao(`${action}-${minutes || ''}`)
     setAviso(null)
@@ -219,7 +241,7 @@ export default function PainelAgendaCampanhas({
               size="sm"
               className="gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
               disabled={!!executandoAcao}
-              onClick={() => controlarFila('pause')}
+              onClick={() => solicitarControleFila('pause')}
             >
               {executandoAcao === 'pause-' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PauseCircle className="w-3.5 h-3.5" />}
               Pausar Pendentes
@@ -230,7 +252,7 @@ export default function PainelAgendaCampanhas({
               size="sm"
               className="gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
               disabled={!!executandoAcao}
-              onClick={() => controlarFila('resume')}
+              onClick={() => solicitarControleFila('resume')}
             >
               {executandoAcao === 'resume-' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlayCircle className="w-3.5 h-3.5" />}
               Retomar Pausados
@@ -241,7 +263,7 @@ export default function PainelAgendaCampanhas({
               size="sm"
               className="gap-1.5"
               disabled={!!executandoAcao}
-              onClick={() => controlarFila('delay', 30)}
+              onClick={() => solicitarControleFila('delay', 30)}
             >
               <Clock className="w-3.5 h-3.5" /> Adiar +30 min
             </Button>
@@ -251,7 +273,7 @@ export default function PainelAgendaCampanhas({
               size="sm"
               className="gap-1.5"
               disabled={!!executandoAcao}
-              onClick={() => controlarFila('delay', 60)}
+              onClick={() => solicitarControleFila('delay', 60)}
             >
               <Clock className="w-3.5 h-3.5" /> Adiar +1 hora
             </Button>
@@ -390,6 +412,23 @@ export default function PainelAgendaCampanhas({
           })}
         </CardContent>
       </Card>
+
+      {/* Confirmação de Ação na Fila */}
+      <AlertDialog open={!!confirmacaoFila} onOpenChange={(open) => !open && setConfirmacaoFila(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Ação na Fila</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmacaoFila?.mensagem}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmacaoFila(null)}>Voltar</AlertDialogCancel>
+            <AlertDialogAction onClick={executarControleFila}>Confirmar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
+

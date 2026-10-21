@@ -13,7 +13,7 @@
  *  - /api, /l e /g: nunca passam pelo cache — sao dados vivos e redirecoes.
  */
 
-const VERSAO = 'alfaaltogrup-v2';
+const VERSAO = 'alfaaltogrup-v3';
 const CACHE_ESTATICO = VERSAO + '-static';
 const CACHE_PAGINAS = VERSAO + '-paginas';
 
