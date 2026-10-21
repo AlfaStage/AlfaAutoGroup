@@ -22,11 +22,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f1115",
+  themeColor: "#09090b",
   width: "device-width",
   initialScale: 1,
-  // Sem isso as areas seguras (notch e barra de gestos) nao valem nada
-  viewportFit: "cover"
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content"
 };
 
 export default function RootLayout({

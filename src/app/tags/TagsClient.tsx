@@ -11,10 +11,23 @@ import { detectarPadrao } from '@/lib/name-pattern'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle
 } from '@/components/ui/dialog'
+import { Progress } from '@/components/ui/progress'
+import { toast } from '@/components/ui/use-toast'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Tag as TagIcon, Plus, Users, Link2, Copy, Check, Loader2, Trash2, Settings2,
   ArrowUp, ArrowDown, AlertCircle, Sparkles, Search, Wand2
 } from 'lucide-react'
+
 
 type Grupo = {
   id: string
@@ -63,6 +76,7 @@ export default function TagsClient() {
   // Quando a tag acabou de ser criada, o passo 2 abre sozinho.
   const [recemCriada, setRecemCriada] = useState(false)
   const [instancias, setInstancias] = useState<string[]>([])
+  const [tagParaRemover, setTagParaRemover] = useState<Tag | null>(null)
 
   /** Recarrega tudo e devolve as tags, para o fluxo de dois passos usar. */
   const carregar = useCallback(async (): Promise<Tag[]> => {
@@ -103,14 +117,26 @@ export default function TagsClient() {
     try {
       await navigator.clipboard.writeText(texto)
       setCopiado(chave)
+      toast.info('Link copiado para a área de transferência.')
       setTimeout(() => setCopiado(null), 1500)
     } catch { /* clipboard bloqueado */ }
   }
 
-  const remover = async (tag: Tag) => {
-    if (!confirm(`Remover a tag "${tag.name}"? Os grupos continuam existindo.`)) return
-    await fetch(`/api/tags/${tag.id}`, { method: 'DELETE' })
-    carregar()
+  const executarRemocaoTag = async () => {
+    if (!tagParaRemover) return
+    const t = tagParaRemover
+    setTagParaRemover(null)
+    try {
+      const res = await fetch(`/api/tags/${t.id}`, { method: 'DELETE' })
+      if (res.ok) {
+        toast.success(`Tag "${t.name}" removida com sucesso.`)
+        carregar()
+      } else {
+        toast.error('Erro ao remover tag.')
+      }
+    } catch {
+      toast.error('Erro de conexão ao remover tag.')
+    }
   }
 
   const totalMembros = tags.reduce((s, t) => s + t.totalMembros, 0)
@@ -203,8 +229,14 @@ export default function TagsClient() {
                     <Button variant="ghost" size="icon" onClick={() => setEditando(tag)} title="Configurar">
                       <Settings2 className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => remover(tag)} title="Remover">
-                      <Trash2 className="w-4 h-4 text-red-500" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setTagParaRemover(tag)}
+                      title="Remover"
+                      className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                    >
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
@@ -233,19 +265,16 @@ export default function TagsClient() {
                 </div>
 
                 {tag.grupoAtivo && (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Ocupação do grupo ativo</span>
                       <span>{tag.grupoAtivo.membros} / {tag.capacity}</span>
                     </div>
-                    <div className="h-2 rounded-full bg-muted/50 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          ocupacao > 90 ? 'bg-amber-500' : 'bg-primary'
-                        }`}
-                        style={{ width: `${ocupacao}%` }}
-                      />
-                    </div>
+                    <Progress
+                      value={ocupacao}
+                      className="h-2"
+                      indicatorClassName={ocupacao > 90 ? "bg-amber-500" : "bg-primary"}
+                    />
                   </div>
                 )}
 
@@ -329,6 +358,27 @@ export default function TagsClient() {
         onOpenChange={(v) => { if (!v) { setGerenciandoGrupos(null); setRecemCriada(false) } }}
         onSaved={() => { setGerenciandoGrupos(null); setRecemCriada(false); carregar() }}
       />
+
+      {/* Confirmação de Remoção de Tag */}
+      <AlertDialog open={!!tagParaRemover} onOpenChange={(open) => !open && setTagParaRemover(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover Tag</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deseja remover a tag &quot;{tagParaRemover?.name}&quot;? Os grupos continuarão existindo sem o agrupamento.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setTagParaRemover(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={executarRemocaoTag}
+            >
+              Remover Tag
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -406,8 +456,8 @@ function TagFormModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[560px] p-0 overflow-hidden flex flex-col max-h-[85dvh]">
+        <DialogHeader className="p-6 pb-4 border-b border-border/50 shrink-0">
           <DialogTitle>{tag ? `Configurar "${tag.name}"` : 'Nova tag — passo 1 de 2'}</DialogTitle>
           <DialogDescription>
             {tag
@@ -416,7 +466,7 @@ function TagFormModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
+        <div className="p-6 overflow-y-auto flex-1 space-y-5 scrollbar-thin">
           <div className="space-y-2">
             <Label htmlFor="tag-nome">Nome</Label>
             <Input
@@ -558,7 +608,7 @@ function TagFormModal({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="p-6 pt-4 border-t border-border/50 shrink-0 bg-background/80 backdrop-blur">
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={salvando}>Fechar</Button>
           <Button onClick={salvar} disabled={salvando || !name.trim()}>
             {salvando
@@ -648,8 +698,8 @@ function GruposDaTagModal({
 
   return (
     <Dialog open={Boolean(tag)} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[640px] p-0 overflow-hidden flex flex-col max-h-[85dvh]">
+        <DialogHeader className="p-6 pb-4 border-b border-border/50 shrink-0">
           <DialogTitle>
             {recemCriada ? 'Nova tag — passo 2 de 2' : `Grupos de "${tag.name}"`}
           </DialogTitle>
@@ -659,7 +709,7 @@ function GruposDaTagModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
+        <div className="p-6 overflow-y-auto flex-1 space-y-5 scrollbar-thin">
           {/* ------------------------------------------ padrão detectado */}
           {sugestao && (
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-2">
@@ -775,7 +825,7 @@ function GruposDaTagModal({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="p-6 pt-4 border-t border-border/50 shrink-0 bg-background/80 backdrop-blur">
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={salvando}>
             {recemCriada ? 'Deixar para depois' : 'Fechar'}
           </Button>

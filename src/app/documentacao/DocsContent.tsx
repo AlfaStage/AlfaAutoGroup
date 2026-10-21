@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Copy, Check, Clock, MessageSquare, ShieldCheck, Image as ImageIcon, Plug, Bot, Megaphone, MousePointerClick, PencilRuler, Tag as TagIcon, Bell, Pencil } from 'lucide-react'
 
 function Bloco({ codigo }: { codigo: string }) {
@@ -124,6 +125,25 @@ export default function DocsContent() {
       </nav>
 
       <div className="space-y-6 min-w-0">
+        {/* Mobile Section Jumper (< lg) */}
+        <div className="lg:hidden">
+          <Select onValueChange={(val) => {
+            const el = document.getElementById(val)
+            if (el) el.scrollIntoView({ behavior: 'smooth' })
+          }}>
+            <SelectTrigger className="w-full bg-card/60 border-border/40">
+              <SelectValue placeholder="Ir para uma seção..." />
+            </SelectTrigger>
+            <SelectContent>
+              {INDICE.map(item => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.texto}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <Secao
           id="formato"
           icone={<Clock className="w-5 h-5" />}

@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { toast } from '@/components/ui/use-toast'
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { MousePointerClick, Copy, Check, ExternalLink, Users, Clock, Share2 } from 'lucide-react'
 
 type GrupoClique = {
@@ -96,11 +98,21 @@ export default function LinksClient() {
 
   const copiar = async (code: string, groupIdPadrao?: string | null) => {
     try {
-      await navigator.clipboard.writeText(montarUrlCurta(code, groupIdPadrao))
+      const url = montarUrlCurta(code, groupIdPadrao)
+      await navigator.clipboard.writeText(url)
       setCopiado(code)
+      toast({
+        title: 'Link copiado!',
+        description: url,
+        variant: 'success'
+      })
       setTimeout(() => setCopiado(null), 1500)
     } catch {
-      /* clipboard bloqueado */
+      toast({
+        title: 'Erro ao copiar',
+        description: 'Permissão de área de transferência negada.',
+        variant: 'destructive'
+      })
     }
   }
 
@@ -158,22 +170,29 @@ export default function LinksClient() {
             <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 items-end h-24 pt-2">
               {horasGlobais.map((qtd, h) => {
                 const pct = Math.round((qtd / maxHoraGlobal) * 100)
+                const horaStr = `${String(h).padStart(2, '0')}h`
                 return (
-                  <div key={h} className="flex flex-col items-center gap-1 group">
-                    <span className="text-[9px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                      {qtd}
-                    </span>
-                    <div className="w-full h-14 bg-muted/30 rounded-sm flex items-end overflow-hidden">
-                      <div
-                        className="w-full bg-primary/80 group-hover:bg-primary rounded-sm transition-all"
-                        style={{ height: `${qtd > 0 ? Math.max(12, pct) : 0}%` }}
-                        title={`${String(h).padStart(2, '0')}h: ${qtd} clique(s)`}
-                      />
-                    </div>
-                    <span className="text-[9px] font-mono text-muted-foreground">
-                      {String(h).padStart(2, '0')}h
-                    </span>
-                  </div>
+                  <Tooltip key={h}>
+                    <TooltipTrigger asChild>
+                      <div className="flex flex-col items-center gap-1 group cursor-pointer w-full">
+                        <span className="text-[9px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
+                          {qtd}
+                        </span>
+                        <div className="w-full h-14 bg-muted/30 rounded-sm flex items-end overflow-hidden">
+                          <div
+                            className="w-full bg-primary/80 group-hover:bg-primary rounded-sm transition-all"
+                            style={{ height: `${qtd > 0 ? Math.max(12, pct) : 0}%` }}
+                          />
+                        </div>
+                        <span className="text-[9px] font-mono text-muted-foreground">
+                          {horaStr}
+                        </span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {horaStr}: {qtd} clique(s)
+                    </TooltipContent>
+                  </Tooltip>
                 )
               })}
             </div>
