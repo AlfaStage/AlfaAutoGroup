@@ -1,53 +1,178 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { InserirVariavel } from '@/components/InserirVariavel'
-import { toast } from '@/components/ui/use-toast'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import InserirVariavel from '@/components/InserirVariavel'
 import {
   Sparkles,
-  Power,
   Send,
-  Trash2,
-  Edit3,
-  RefreshCw,
-  ShieldCheck,
+  ShieldAlert,
   Clock,
   CheckCircle2,
   XCircle,
-  AlertTriangle,
+  Loader2,
+  Trash2,
   Plus,
-  Upload,
+  RefreshCw,
   FlaskConical,
-  Tag as TagIcon,
-  Users
+  Upload,
+  Power,
+  Layers,
+  ArrowUp,
+  ArrowDown,
+  Copy
 } from 'lucide-react'
 
-type WelcomeButtonItem = {
-  type: 'reply' | 'url'
+type WelcomeButtonDraft = {
+  type: 'reply' | 'url' | 'copy' | 'call'
   displayText: string
   id?: string
   url?: string
-  track?: boolean
+  copyCode?: string
+  phoneNumber?: string
 }
 
-export function PainelBoasVindas({
+type WelcomeBlockDraft = {
+  uid: string
+  type: 'text' | 'media' | 'button' | 'poll'
+  text: string
+  mediaUrl: string
+  mediaType: 'image' | 'video' | 'audio' | 'document'
+  mediaCaption: string
+  fileName: string
+  btnTitle: string
+  btnDesc: string
+  btnFooter: string
+  btnImageUrl: string
+  buttonsList: WelcomeButtonDraft[]
+  pollName: string
+  pollCount: number
+  pollOptions: string[]
+}
+
+const MAX_BLOCKS = 8
+
+function criarBlocoPadrao(partial?: Partial<WelcomeBlockDraft>): WelcomeBlockDraft {
+  return {
+    uid: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    type: 'text',
+    text: 'Olá {primeiro_nome}! {saudacao_emoji}\n\nSeja muito bem-vindo(a) ao *{grupo}*!\nAqui está seu acesso exclusivo:',
+    mediaUrl: '',
+    mediaType: 'image',
+    mediaCaption: '',
+    fileName: '',
+    btnTitle: 'Bem-vindo(a) ao {grupo}! 🎉',
+    btnDesc: 'Olá {primeiro_nome}, aproveite sua oferta exclusiva de boas-vindas abaixo:',
+    btnFooter: 'Equipe {tag}',
+    btnImageUrl: '',
+    buttonsList: [{ type: 'url', displayText: 'Acessar Oferta', url: 'https://' }],
+    pollName: 'Olá {primeiro_nome}! Qual seu principal interesse no {grupo}?',
+    pollCount: 1,
+    pollOptions: ['Ofertas VIP', 'Conteúdos Exclusivos'],
+    ...partial
+  }
+}
+
+function hidratarBlocoDeApi(blkType: string, c: any): WelcomeBlockDraft {
+  const safeType = (['text', 'media', 'button', 'poll'].includes(blkType) ? blkType : 'text') as
+    | 'text'
+    | 'media'
+    | 'button'
+    | 'poll'
+
+  return criarBlocoPadrao({
+    type: safeType,
+    text: c?.text || '',
+    mediaUrl: c?.media || '',
+    mediaType: c?.mediatype || 'image',
+    mediaCaption: c?.caption || '',
+    fileName: c?.fileName || '',
+    btnTitle: c?.title || '',
+    btnDesc: c?.description || '',
+    btnFooter: c?.footer || '',
+    btnImageUrl: c?.imageUrl || '',
+    buttonsList:
+      Array.isArray(c?.buttons) && c.buttons.length > 0
+        ? c.buttons.map((b: any) => ({
+            type: b.type || 'url',
+            displayText: b.displayText || '',
+            id: b.id || '',
+            url: b.url || '',
+            copyCode: b.copyCode || '',
+            phoneNumber: b.phoneNumber || ''
+          }))
+        : [{ type: 'url', displayText: 'Acessar', url: 'https://' }],
+    pollName: c?.name || '',
+    pollCount: Number(c?.selectableCount || 1),
+    pollOptions:
+      Array.isArray(c?.values) && c.values.length >= 2 ? c.values : ['Opção 1', 'Opção 2']
+  })
+}
+
+function serializarBlocoParaApi(blk: WelcomeBlockDraft): { type: string; content: Record<string, any> } {
+  if (blk.type === 'text') {
+    return { type: 'text', content: { text: blk.text } }
+  }
+  if (blk.type === 'media') {
+    return {
+      type: 'media',
+      content: {
+        media: blk.mediaUrl,
+        mediatype: blk.mediaType,
+        caption: blk.mediaCaption,
+        fileName: blk.fileName || 'boas-vindas'
+      }
+    }
+  }
+  if (blk.type === 'button') {
+    return {
+      type: 'button',
+      content: {
+        title: blk.btnTitle,
+        description: blk.btnDesc,
+        footer: blk.btnFooter,
+        ...(blk.btnImageUrl ? { imageUrl: blk.btnImageUrl } : {}),
+        buttons: blk.buttonsList.map((b, idx) => ({
+          type: b.type,
+          displayText: b.displayText,
+          ...(b.type === 'reply' ? { id: b.id || `btn_${idx + 1}` } : {}),
+          ...(b.type === 'url' ? { url: b.url || '' } : {}),
+          ...(b.type === 'copy' ? { copyCode: b.copyCode || '' } : {}),
+          ...(b.type === 'call' ? { phoneNumber: b.phoneNumber || '' } : {})
+        }))
+      }
+    }
+  }
+  return {
+    type: 'poll',
+    content: {
+      name: blk.pollName,
+      selectableCount: Number(blk.pollCount) || 1,
+      values: blk.pollOptions.map(o => o.trim()).filter(Boolean)
+    }
+  }
+}
+
+function resumirBloco(blk: { type: string; content: any }): string {
+  const c = blk?.content || {}
+  if (blk.type === 'text') return String(c.text || '').slice(0, 90)
+  if (blk.type === 'media') return `[${String(c.mediatype || 'image').toUpperCase()}] ${c.caption || c.media || ''}`.slice(0, 90)
+  if (blk.type === 'button') {
+    const qtdBotoes = Array.isArray(c.buttons) ? c.buttons.length : 0
+    return `${c.title ? `${c.title} — ` : ''}${c.description || ''} (${qtdBotoes} botão/botões)`.slice(0, 90)
+  }
+  if (blk.type === 'poll') return `[ENQUETE] ${c.name || ''}`.slice(0, 90)
+  return ''
+}
+
+export default function PainelBoasVindas({
   groups = [],
   tags = []
 }: {
@@ -58,15 +183,13 @@ export function PainelBoasVindas({
   const [carregando, setCarregando] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [testandoId, setTestandoId] = useState<string | null>(null)
-  const [fazendoUpload, setFazendoUpload] = useState(false)
-  const [regraParaExcluir, setRegraParaExcluir] = useState<any | null>(null)
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null)
 
-
-  // Estado do formulário de criação/edição de regra
-  const [escopo, setEscopo] = useState<'tag' | 'group'>('tag')
-  const [targetGroupId, setTargetGroupId] = useState<string>('')
-  const [targetTagId, setTargetTagId] = useState<string>('')
-  const [type, setType] = useState<'text' | 'media' | 'button' | 'poll'>('text')
+  // Estado do formulario de criacao / edicao de regra
+  const [escopo, setEscopo] = useState<'tag' | 'group'>('group')
+  const [groupId, setGroupId] = useState<string>('')
+  const [tagId, setTagId] = useState<string>('')
   const [enabled, setEnabled] = useState<boolean>(false)
   const [trackLinks, setTrackLinks] = useState<boolean>(true)
   const [delayMinSec, setDelayMinSec] = useState<number>(45)
@@ -74,32 +197,15 @@ export function PainelBoasVindas({
   const [cooldownDays, setCooldownDays] = useState<number>(30)
   const [senderInstance, setSenderInstance] = useState<string>('padrao')
 
-  // Campos de conteúdo conforme tipo
-  const [text, setText] = useState<string>(
-    '{Olá|Oi|Seja muito bem-vindo(a)} {primeiro_nome}! 👋\n\nVocê acabou de entrar no grupo *{grupo}* ({tag}).\nConfira nossa condição especial de boas-vindas:'
-  )
-  const [mediaUrl, setMediaUrl] = useState<string>('')
-  const [mediatype, setMediatype] = useState<string>('image')
-  const [fileName, setFileName] = useState<string>('')
-  const [caption, setCaption] = useState<string>(
-    '{Olá|Oi} {primeiro_nome}! Seja bem-vindo(a) ao *{grupo}*!'
-  )
-  const [btnTitle, setBtnTitle] = useState<string>('Bem-vindo(a) ao {grupo}!')
-  const [btnDesc, setBtnDesc] = useState<string>(
-    '{Olá|Oi} {primeiro_nome}, preparamos um presente exclusivo para novos membros da {cidade}:'
-  )
-  const [btnFooter, setBtnFooter] = useState<string>('Oferta exclusiva de boas-vindas')
-  const [buttonsList, setButtonsList] = useState<WelcomeButtonItem[]>([
-    { type: 'url', displayText: 'Resgatar Promoção', url: 'https://', track: true }
-  ])
-  const [pollName, setPollName] = useState<string>(
-    'Olá {primeiro_nome}! O que você mais busca no {grupo}?'
-  )
-  const [pollOptions, setPollOptions] = useState<string>('Promoções, Novidades, Atendimento VIP')
+  // Lista de blocos de mensagem (1 bloco unico ou multiplos blocos em sequencia)
+  const [blocks, setBlocks] = useState<WelcomeBlockDraft[]>(() => [criarBlocoPadrao()])
 
-  // Destino para o teste seguro entre instâncias
-  const [instanciaDestinoTeste, setInstanciaDestinoTeste] = useState<string>('')
-  const [telefoneTesteManual, setTelefoneTesteManual] = useState<string>('')
+  // Estado do modal / barra de Teste Seguro
+  const [regraParaTeste, setRegraParaTeste] = useState<any | null>(null)
+  const [modoDestinoTeste, setModoDestinoTeste] = useState<'instancia' | 'numero'>('instancia')
+  const [targetInstanceName, setTargetInstanceName] = useState<string>('')
+  const [targetPhoneOrJid, setTargetPhoneOrJid] = useState<string>('')
+  const [targetName, setTargetName] = useState<string>('Visitante VIP Teste')
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -108,112 +214,252 @@ export function PainelBoasVindas({
       if (res.ok) {
         const json = await res.json()
         setDados(json)
-        if (!instanciaDestinoTeste && json.instancias?.length > 0) {
-          const pref =
-            json.instancias.find((i: any) => i.connected && i.name === 'AlfaStage') ||
-            json.instancias.find((i: any) => i.connected) ||
-            json.instancias[0]
-          setInstanciaDestinoTeste(pref.name)
+        if (!targetInstanceName && Array.isArray(json.instancias) && json.instancias.length > 0) {
+          const conectada = json.instancias.find((i: any) => i.connected) || json.instancias[0]
+          setTargetInstanceName(conectada.name)
         }
       }
-    } catch (e) {
-      console.error('Erro ao carregar boas-vindas:', e)
     } finally {
       setCarregando(false)
     }
-  }, [instanciaDestinoTeste])
+  }, [targetInstanceName])
 
   useEffect(() => {
     carregar()
   }, [carregar])
 
-  const handleUploadArquivo = async (file: File) => {
-    setFazendoUpload(true)
+  const atualizarBloco = (uid: string, patch: Partial<WelcomeBlockDraft>) => {
+    setBlocks(prev => prev.map(b => (b.uid === uid ? { ...b, ...patch } : b)))
+  }
+
+  const adicionarBloco = () => {
+    if (blocks.length >= MAX_BLOCKS) {
+      setAviso({ tipo: 'erro', texto: `O limite máximo é de ${MAX_BLOCKS} blocos por sequência.` })
+      return
+    }
+    setBlocks(prev => [
+      ...prev,
+      criarBlocoPadrao({
+        type: 'text',
+        text: 'Caso tenha alguma dúvida sobre o *{grupo}*, basta responder aqui!'
+      })
+    ])
+  }
+
+  const duplicarBloco = (idx: number) => {
+    if (blocks.length >= MAX_BLOCKS) {
+      setAviso({ tipo: 'erro', texto: `O limite máximo é de ${MAX_BLOCKS} blocos por sequência.` })
+      return
+    }
+    setBlocks(prev => {
+      const orig = prev[idx]
+      if (!orig) return prev
+      const clone: WelcomeBlockDraft = {
+        ...orig,
+        uid: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        buttonsList: orig.buttonsList.map(b => ({ ...b })),
+        pollOptions: [...orig.pollOptions]
+      }
+      const next = [...prev]
+      next.splice(idx + 1, 0, clone)
+      return next
+    })
+  }
+
+  const removerBloco = (uid: string) => {
+    setBlocks(prev => (prev.length <= 1 ? prev : prev.filter(b => b.uid !== uid)))
+  }
+
+  const moverBloco = (idx: number, direcao: -1 | 1) => {
+    setBlocks(prev => {
+      const targetIdx = idx + direcao
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev
+      const next = [...prev]
+      const [item] = next.splice(idx, 1)
+      next.splice(targetIdx, 0, item)
+      return next
+    })
+  }
+
+  const handleUploadArquivoBloco = async (
+    uid: string,
+    e: React.ChangeEvent<HTMLInputElement>,
+    alvo: 'media' | 'button'
+  ) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingKey(`${uid}:${alvo}`)
+    setAviso(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
       const res = await fetch('/api/upload', { method: 'POST', body: fd })
       const data = await res.json()
-      if (res.ok && data.url) {
-        setMediaUrl(data.url)
-        if (data.mediatype) setMediatype(data.mediatype)
-        if (data.filename) setFileName(data.filename)
+      if (!res.ok) {
+        setAviso({ tipo: 'erro', texto: data.error || 'Falha no upload' })
+        return
+      }
+      if (alvo === 'media') {
+        atualizarBloco(uid, {
+          mediaUrl: data.url || data.path,
+          ...(data.mediatype ? { mediaType: data.mediatype } : {}),
+          fileName: file.name
+        })
       } else {
-        toast.error(data.error || 'Erro ao enviar arquivo', 'Upload')
+        atualizarBloco(uid, {
+          btnImageUrl: data.url || data.path
+        })
       }
+      setAviso({ tipo: 'ok', texto: `Arquivo "${file.name}" enviado com sucesso!` })
     } catch {
-      toast.error('Falha no upload do arquivo', 'Upload')
+      setAviso({ tipo: 'erro', texto: 'Erro de conexão ao enviar arquivo.' })
     } finally {
-      setFazendoUpload(false)
-    }
-  }
-
-  const montarContent = () => {
-    if (type === 'text') {
-      return { text, trackLinks }
-    }
-    if (type === 'media') {
-      return {
-        media: mediaUrl,
-        mediatype,
-        caption,
-        fileName: fileName || 'arquivo',
-        trackLinks
-      }
-    }
-    if (type === 'button') {
-      const contentObj: any = {
-        title: btnTitle,
-        description: btnDesc,
-        footer: btnFooter,
-        buttons: buttonsList.map((b, idx) => ({
-          type: b.type,
-          displayText: b.displayText,
-          id: b.id || `btn_${idx + 1}`,
-          ...(b.type === 'url' ? { url: b.url, track: b.track !== false } : {})
-        }))
-      }
-      const hasCTA = buttonsList.some(b => b.type !== 'reply')
-      if (!hasCTA && mediaUrl) {
-        if (mediatype === 'video') contentObj.videoUrl = mediaUrl
-        else contentObj.imageUrl = mediaUrl
-      }
-      return contentObj
-    }
-    const opts = pollOptions
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-    return {
-      name: pollName,
-      selectableCount: 1,
-      values: opts.length >= 2 ? opts : ['Sim', 'Não']
+      setUploadingKey(null)
     }
   }
 
   const salvarRegra = async () => {
-    if (escopo === 'tag' && !targetTagId) {
-      toast.error('Selecione uma Tag para vincular a regra de boas-vindas.', 'Validação')
+    setAviso(null)
+    if (escopo === 'group' && !groupId) {
+      setAviso({ tipo: 'erro', texto: 'Selecione o Grupo para configurar a regra.' })
       return
     }
-    if (escopo === 'group' && !targetGroupId) {
-      toast.error('Selecione um Grupo para vincular a regra de boas-vindas.', 'Validação')
+    if (escopo === 'tag' && !tagId) {
+      setAviso({ tipo: 'erro', texto: 'Selecione a Tag para configurar a regra.' })
+      return
+    }
+    if (blocks.length === 0) {
+      setAviso({ tipo: 'erro', texto: 'Adicione ao menos 1 bloco de mensagem.' })
       return
     }
 
+    const serializedBlocks = blocks.map(serializarBlocoParaApi)
+    const primary = serializedBlocks[0]
+
     setSalvando(true)
     try {
-      const payload = {
-        action: 'upsert',
-        ...(escopo === 'tag' ? { tagId: targetTagId } : { groupId: targetGroupId }),
-        type,
-        content: montarContent(),
-        enabled,
-        trackLinks,
-        delayMinSec: Number(delayMinSec) || 45,
-        delayMaxSec: Number(delayMaxSec) || 150,
-        cooldownDays: Number(cooldownDays) || 30,
-        senderInstance: senderInstance === 'padrao' ? null : senderInstance
+      const res = await fetch('/api/welcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'upsert',
+          groupId: escopo === 'group' ? groupId : null,
+          tagId: escopo === 'tag' ? tagId : null,
+          type: primary.type,
+          content: primary.content,
+          blocks: serializedBlocks,
+          enabled,
+          trackLinks,
+          delayMinSec,
+          delayMaxSec,
+          cooldownDays,
+          senderInstance: senderInstance === 'padrao' ? null : senderInstance
+        })
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setAviso({ tipo: 'erro', texto: json.error || 'Erro ao salvar regra de boas-vindas.' })
+        return
+      }
+      setAviso({
+        tipo: 'ok',
+        texto: `Regra salva com sucesso (${serializedBlocks.length} ${serializedBlocks.length === 1 ? 'bloco' : 'blocos'})! ${json.linksCriados ? `${json.linksCriados} link(s) rastreável(is) gerado(s).` : ''}`
+      })
+      await carregar()
+    } catch {
+      setAviso({ tipo: 'erro', texto: 'Falha de comunicação ao salvar regra.' })
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const editarRegra = (r: any) => {
+    setEscopo(r.escopo === 'tag' ? 'tag' : 'group')
+    setGroupId(r.groupId || '')
+    setTagId(r.tagId || '')
+    setEnabled(Boolean(r.enabled))
+    setDelayMinSec(Number(r.delayMinSec ?? 45))
+    setDelayMaxSec(Number(r.delayMaxSec ?? 150))
+    setCooldownDays(Number(r.cooldownDays ?? 30))
+    setSenderInstance(r.senderInstance || 'padrao')
+
+    const c = r.content || {}
+    setTrackLinks(c.trackLinks !== false)
+
+    const apiBlocks = Array.isArray(r.blocks) && r.blocks.length > 0
+      ? r.blocks
+      : Array.isArray(c.blocks) && c.blocks.length > 0
+        ? c.blocks
+        : [{ type: r.type || 'text', content: c }]
+
+    setBlocks(
+      apiBlocks.map((b: any) =>
+        hidratarBlocoDeApi(b.type || r.type || 'text', b.content || b)
+      )
+    )
+
+    setAviso({
+      tipo: 'ok',
+      texto: `Regra carregada no formulário (${apiBlocks.length} ${apiBlocks.length === 1 ? 'bloco' : 'blocos'}) para edição.`
+    })
+  }
+
+  const alternarAtivacao = async (r: any, proximoEstado: boolean) => {
+    setAviso(null)
+    const res = await fetch('/api/welcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggle',
+        id: r.id,
+        enabled: proximoEstado
+      })
+    })
+    const json = await res.json().catch(() => ({}))
+    if (res.ok) {
+      setAviso({
+        tipo: 'ok',
+        texto: proximoEstado
+          ? 'Regra de boas-vindas ATIVADA!'
+          : 'Regra de boas-vindas DESATIVADA (Modo Seguro).'
+      })
+      carregar()
+    } else {
+      setAviso({
+        tipo: 'erro',
+        texto: json.error || 'Não foi possível alterar o status da regra.'
+      })
+    }
+  }
+
+  const excluirRegra = async (id: string) => {
+    setAviso(null)
+    const res = await fetch('/api/welcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', id })
+    })
+    if (res.ok) {
+      setAviso({ tipo: 'ok', texto: 'Regra removida com sucesso.' })
+      if (regraParaTeste?.id === id) setRegraParaTeste(null)
+      carregar()
+    }
+  }
+
+  const dispararTesteSeguro = async () => {
+    if (!regraParaTeste) return
+    setTestandoId(regraParaTeste.id)
+    setAviso(null)
+    try {
+      const payload: any = {
+        action: 'test',
+        ruleId: regraParaTeste.id,
+        targetName
+      }
+      if (modoDestinoTeste === 'instancia') {
+        payload.targetInstanceName = targetInstanceName
+      } else {
+        payload.targetPhoneOrJid = targetPhoneOrJid
       }
 
       const res = await fetch('/api/welcome', {
@@ -223,148 +469,39 @@ export function PainelBoasVindas({
       })
       const json = await res.json()
       if (!res.ok) {
-        toast.error(json.error || 'Erro ao salvar regra de boas-vindas', 'Erro')
-        return
-      }
-      await carregar()
-      toast.success('Regra de boas-vindas salva com sucesso!', 'Salvo')
-    } catch {
-      toast.error('Erro de conexão ao salvar regra', 'Conexão')
-    } finally {
-      setSalvando(false)
-    }
-  }
-
-  const editarRegra = (regra: any) => {
-    if (regra.tagId) {
-      setEscopo('tag')
-      setTargetTagId(regra.tagId)
-      setTargetGroupId('')
-    } else {
-      setEscopo('group')
-      setTargetGroupId(regra.groupId || '')
-      setTargetTagId('')
-    }
-    setType(regra.type || 'text')
-    setEnabled(Boolean(regra.enabled))
-    setDelayMinSec(regra.delayMinSec ?? 45)
-    setDelayMaxSec(regra.delayMaxSec ?? 150)
-    setCooldownDays(regra.cooldownDays ?? 30)
-    setSenderInstance(regra.senderInstance || 'padrao')
-
-    const c = regra.content || {}
-    if (regra.type === 'text') {
-      setText(c.text || '')
-    } else if (regra.type === 'media') {
-      setMediaUrl(c.media || '')
-      setMediatype(c.mediatype || 'image')
-      setCaption(c.caption || '')
-      setFileName(c.fileName || '')
-    } else if (regra.type === 'button') {
-      setBtnTitle(c.title || '')
-      setBtnDesc(c.description || '')
-      setBtnFooter(c.footer || '')
-      setMediaUrl(c.imageUrl || c.videoUrl || '')
-      setMediatype(c.videoUrl ? 'video' : 'image')
-      if (Array.isArray(c.buttons) && c.buttons.length > 0) {
-        setButtonsList(c.buttons)
-      }
-    } else if (regra.type === 'poll') {
-      setPollName(c.name || '')
-      setPollOptions(Array.isArray(c.values) ? c.values.join(', ') : '')
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const alternarStatusRegra = async (regra: any) => {
-    try {
-      const res = await fetch('/api/welcome', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'toggle',
-          id: regra.id,
-          enabled: !regra.enabled
+        setAviso({
+          tipo: 'erro',
+          texto: `${json.error || 'Falha no teste'}${json.details ? ` — ${String(json.details).slice(0, 140)}` : ''}`
         })
-      })
-      if (res.ok) await carregar()
-    } catch {
-      toast.error('Erro ao alterar status da regra', 'Status')
-    }
-  }
-
-  const executarExclusaoRegra = async (regra: any) => {
-    try {
-      const res = await fetch('/api/welcome', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', id: regra.id })
-      })
-      if (res.ok) {
-        toast.success('Regra de boas-vindas excluída com sucesso!', 'Exclusão')
+      } else {
+        const qtd = Number(json.blocksSent || 1)
+        setAviso({
+          tipo: 'ok',
+          texto: `Teste enviado com sucesso (${qtd} ${qtd === 1 ? 'bloco' : 'blocos'}) pela instância "${json.senderInstance}" para "${json.recipient}"!`
+        })
         await carregar()
-      } else {
-        toast.error('Erro ao excluir regra', 'Exclusão')
       }
     } catch {
-      toast.error('Erro ao excluir regra', 'Exclusão')
-    }
-  }
-
-  const dispararTesteEntreInstancias = async (regra: any) => {
-    if (!instanciaDestinoTeste && !telefoneTesteManual.trim()) {
-      toast.error('Selecione uma instância conectada de destino ou informe um número de teste.', 'Validação')
-      return
-    }
-    setTestandoId(regra.id)
-    try {
-      const payload: any = {
-        action: 'test',
-        ruleId: regra.id,
-        targetName: 'Teste Entre Instâncias'
-      }
-      if (telefoneTesteManual.trim()) {
-        payload.targetPhoneOrJid = telefoneTesteManual.trim()
-      } else {
-        payload.targetInstanceName = instanciaDestinoTeste
-      }
-
-      const res = await fetch('/api/welcome', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      const json = await res.json()
-      if (!res.ok || !json.ok) {
-        toast.error(json.error || 'Falha no envio de teste', 'Falha')
-      } else {
-        toast.success(
-          `Teste enviado com sucesso!\nRemetente: ${json.senderInstance}\nDestino: ${json.recipient}`,
-          'Teste enviado'
-        )
-      }
-      await carregar()
-    } catch {
-      toast.error('Erro ao executar disparo de teste', 'Erro')
+      setAviso({ tipo: 'erro', texto: 'Erro de conexão ao disparar teste.' })
     } finally {
       setTestandoId(null)
     }
   }
 
   const controlarFila = async (subAction: 'cancel_pending' | 'retry_errors') => {
-    try {
-      const res = await fetch('/api/welcome', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'queue_control', subAction })
+    setAviso(null)
+    const res = await fetch('/api/welcome', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'queue_control', subAction })
+    })
+    const json = await res.json()
+    if (res.ok) {
+      setAviso({
+        tipo: 'ok',
+        texto: `Ação concluída na fila (${json.afetados || 0} registro(s) atualizado(s)).`
       })
-      const json = await res.json()
-      if (res.ok) {
-        toast.success(`Ação concluída (${json.afetados || 0} registro(s) atualizado(s)).`, 'Fila')
-        await carregar()
-      }
-    } catch {
-      toast.error('Erro ao controlar fila de boas-vindas', 'Erro')
+      carregar()
     }
   }
 
@@ -376,111 +513,116 @@ export function PainelBoasVindas({
     enviadosTotal: 0,
     errosTotal: 0
   }
-  const regras: any[] = dados?.regras || []
-  const fila: any[] = dados?.fila || []
-  const instancias: any[] = dados?.instancias || []
+  const regras = dados?.regras || []
+  const fila = dados?.fila || []
+  const instancias = dados?.instancias || []
 
   return (
     <div className="space-y-6">
-      {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card className="border-border/40 bg-card/40">
-          <CardContent className="pt-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Regras Ativas</p>
-            <p className="text-2xl font-bold text-emerald-400">
-              {resumo.regrasAtivas}{' '}
-              <span className="text-sm font-normal text-muted-foreground">
-                / {resumo.regrasTotais}
-              </span>
+      {/* Aviso de Modo de Teste Seguro */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs sm:text-sm">
+            <p className="font-semibold text-amber-900 dark:text-amber-200">
+              Proteção Anti-Disparo em Grupos Finais Ativa
             </p>
-          </CardContent>
+            <p className="text-amber-800/90 dark:text-amber-300/90">
+              Novas regras nascem <strong>Desativadas (Modo Rascunho/Teste)</strong> por padrão. Você pode configurar{' '}
+              <strong>1 mensagem única</strong> ou <strong>múltiplos blocos em sequência</strong> (cada bloco com seu formato) e validar com o{' '}
+              <strong>Disparo de Teste entre Instâncias</strong>.
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={carregar} disabled={carregando} className="shrink-0">
+          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${carregando ? 'animate-spin' : ''}`} />
+          Atualizar
+        </Button>
+      </div>
+
+      {/* Feedback */}
+      {aviso && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm flex items-center justify-between ${
+            aviso.tipo === 'ok'
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200'
+              : 'border-destructive/40 bg-destructive/10 text-destructive'
+          }`}
+        >
+          <span>{aviso.texto}</span>
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setAviso(null)}>
+            Fechar
+          </Button>
+        </div>
+      )}
+
+      {/* KPIs Rapidos */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Card className="p-3.5">
+          <p className="text-xs text-muted-foreground">Regras Ativas / Total</p>
+          <p className="text-xl font-bold mt-1">
+            {resumo.regrasAtivas} <span className="text-sm font-normal text-muted-foreground">/ {resumo.regrasTotais}</span>
+          </p>
         </Card>
-        <Card className="border-border/40 bg-card/40">
-          <CardContent className="pt-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Na Fila (Delay Anti-Ban)
-            </p>
-            <p className="text-2xl font-bold text-amber-400">{resumo.pendentesFila}</p>
-          </CardContent>
+        <Card className="p-3.5">
+          <p className="text-xs text-muted-foreground">Pendentes na Fila</p>
+          <p className="text-xl font-bold mt-1 text-amber-600">{resumo.pendentesFila}</p>
         </Card>
-        <Card className="border-border/40 bg-card/40">
-          <CardContent className="pt-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              Enviados Hoje / Total
-            </p>
-            <p className="text-2xl font-bold text-primary">
-              {resumo.enviadosHoje}{' '}
-              <span className="text-sm font-normal text-muted-foreground">
-                / {resumo.enviadosTotal}
-              </span>
-            </p>
-          </CardContent>
+        <Card className="p-3.5">
+          <p className="text-xs text-muted-foreground">Boas-Vindas Hoje</p>
+          <p className="text-xl font-bold mt-1 text-emerald-600">{resumo.enviadosHoje}</p>
         </Card>
-        <Card className="border-border/40 bg-card/40">
-          <CardContent className="pt-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Falhas</p>
-            <p className="text-2xl font-bold text-red-400">{resumo.errosTotal}</p>
-          </CardContent>
+        <Card className="p-3.5">
+          <p className="text-xs text-muted-foreground">Total Entregues</p>
+          <p className="text-xl font-bold mt-1">{resumo.enviadosTotal}</p>
+        </Card>
+        <Card className="p-3.5">
+          <p className="text-xs text-muted-foreground">Erros na Fila</p>
+          <p className="text-xl font-bold mt-1 text-destructive">{resumo.errosTotal}</p>
         </Card>
       </div>
 
-      {/* Configurador de Regra + Modo de Teste Entre Instâncias */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 border-border/40 bg-card/40">
-          <CardHeader className="border-b border-border/40 pb-4">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary" /> Configurar Automação de Boas-Vindas (PV)
-            </CardTitle>
-            <CardDescription>
-              Quando um novo membro entrar no grupo, ele receberá esta mensagem no privado com delay humanizado.
+      {/* Grid Principal: Construtor de Regra + Simulador/Lista */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Coluna Esquerda: Construtor de Regra (7 cols) */}
+        <Card className="lg:col-span-7">
+          <CardHeader className="pb-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                Configurar Automação de Boas-Vindas (PV)
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs flex items-center gap-1">
+                <Layers className="w-3 h-3" />
+                {blocks.length === 1 ? '1 Bloco de Mensagem' : `${blocks.length} Blocos em Sequência`}
+              </Badge>
+            </div>
+            <CardDescription className="text-xs">
+              Configure 1 mensagem única ou empilhe vários blocos enviados em sequência no privado quando um novo membro entrar no grupo.
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-5 space-y-4">
-            {/* Escopo: Tag ou Grupo */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <CardContent className="space-y-4">
+            {/* Escopo: Grupo vs Tag */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Aplicar Regra por</Label>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant={escopo === 'tag' ? 'default' : 'outline'}
-                    size="sm"
-                    className="flex-1 gap-1.5"
-                    onClick={() => setEscopo('tag')}
-                  >
-                    <TagIcon className="w-4 h-4" /> Por Tag (Herança)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={escopo === 'group' ? 'default' : 'outline'}
-                    size="sm"
-                    className="flex-1 gap-1.5"
-                    onClick={() => setEscopo('group')}
-                  >
-                    <Users className="w-4 h-4" /> Por Grupo
-                  </Button>
-                </div>
+                <Label className="text-xs">Escopo da Regra</Label>
+                <Select value={escopo} onValueChange={(v: 'group' | 'tag') => setEscopo(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="group">Por Grupo Específico</SelectItem>
+                    <SelectItem value="tag">Por Tag (Todos os grupos da Tag)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <div className="space-y-1.5">
-                <Label>{escopo === 'tag' ? 'Selecione a Tag' : 'Selecione o Grupo'}</Label>
-                {escopo === 'tag' ? (
-                  <Select value={targetTagId} onValueChange={setTargetTagId}>
+              {escopo === 'group' ? (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Selecione o Grupo</Label>
+                  <Select value={groupId} onValueChange={setGroupId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Escolha uma Tag..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tags.map((t: any) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name} ({t.groups?.length || 0} grupos)
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Select value={targetGroupId} onValueChange={setTargetGroupId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Escolha um Grupo..." />
+                      <SelectValue placeholder="Escolha um grupo..." />
                     </SelectTrigger>
                     <SelectContent>
                       {groups.map((g: any) => (
@@ -490,241 +632,529 @@ export function PainelBoasVindas({
                       ))}
                     </SelectContent>
                   </Select>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Selecione a Tag</Label>
+                  <Select value={tagId} onValueChange={setTagId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Escolha uma Tag..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tags.map((t: any) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
-            {/* Formato da Mensagem & Instância Remetente */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Formato da Mensagem</Label>
-                <Select value={type} onValueChange={(v: any) => setType(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="text">Texto (c/ Variáveis &amp; Spintax)</SelectItem>
-                    <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, PDF)</SelectItem>
-                    <SelectItem value="button">Botões Interativos / CTA</SelectItem>
-                    <SelectItem value="poll">Enquete Interativa</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Instância Remetente (Proteção de Chip)</Label>
-                <Select value={senderInstance} onValueChange={setSenderInstance}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="padrao">Mesma instância do grupo (ou conectada ativa)</SelectItem>
-                    {instancias.map((inst: any) => (
-                      <SelectItem key={inst.name} value={inst.name}>
-                        {inst.connected ? '🟢' : '🔴'} {inst.name}{' '}
-                        {inst.phone ? `(${inst.phone})` : ''}{' '}
-                        {inst.connected ? '• Conectada' : '• Desconectada'}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {/* Instancia Remetente */}
+            <div className="space-y-1.5">
+              <Label className="text-xs">Instância Remetente</Label>
+              <Select value={senderInstance} onValueChange={setSenderInstance}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="padrao">Automática (Mesma instância do grupo)</SelectItem>
+                  {instancias.map((inst: any) => (
+                    <SelectItem key={inst.name} value={inst.name}>
+                      {inst.name} {inst.phone ? `(${inst.phone})` : ''} {inst.connected ? '🟢' : '🔴'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Conteúdo Dinâmico conforme Formato */}
-            {type === 'text' && (
-              <div className="space-y-2">
-                <Label>Mensagem de Boas-Vindas</Label>
-                <Textarea
-                  rows={4}
-                  value={text}
-                  onChange={e => setText(e.target.value)}
-                  placeholder="Digite a mensagem que será enviada no privado..."
-                />
-                <InserirVariavel onInsert={v => setText(prev => `${prev}${v}`)} />
+            {/* Lista de Blocos de Mensagem */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Blocos da Sequência de Boas-Vindas ({blocks.length}/{MAX_BLOCKS})
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={adicionarBloco}
+                  disabled={blocks.length >= MAX_BLOCKS}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Bloco de Mensagem
+                </Button>
               </div>
-            )}
 
-            {type === 'media' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="space-y-1.5">
-                    <Label>Tipo de Mídia</Label>
-                    <Select value={mediatype} onValueChange={setMediatype}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="image">Imagem</SelectItem>
-                        <SelectItem value="video">Vídeo</SelectItem>
-                        <SelectItem value="audio">Áudio</SelectItem>
-                        <SelectItem value="document">Documento / PDF</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="sm:col-span-2 space-y-1.5">
-                    <Label>URL da Mídia ou Upload</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={mediaUrl}
-                        onChange={e => setMediaUrl(e.target.value)}
-                        placeholder="https://... ou envie um arquivo"
-                      />
-                      <label className="cursor-pointer inline-flex items-center px-3 py-2 rounded-md border border-border bg-muted/40 hover:bg-muted text-xs font-medium shrink-0">
-                        <Upload className="w-3.5 h-3.5 mr-1.5" />
-                        {fazendoUpload ? 'Enviando...' : 'Upload'}
-                        <input
-                          type="file"
-                          className="hidden"
-                          onChange={e => {
-                            const f = e.target.files?.[0]
-                            if (f) handleUploadArquivo(f)
-                          }}
-                        />
-                      </label>
+              {blocks.map((blk, idx) => (
+                <div
+                  key={blk.uid}
+                  className="rounded-xl border bg-muted/20 p-3.5 space-y-3 relative transition-all"
+                >
+                  {/* Cabecalho do Bloco */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="default" className="text-[11px]">
+                        Bloco #{idx + 1}
+                      </Badge>
+                      <Select
+                        value={blk.type}
+                        onValueChange={(v: 'text' | 'media' | 'button' | 'poll') =>
+                          atualizarBloco(blk.uid, { type: v })
+                        }
+                      >
+                        <SelectTrigger className="h-8 text-xs w-[230px] bg-background">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="text">Texto (com Variáveis / Spintax)</SelectItem>
+                          <SelectItem value="media">Mídia (Imagem, Vídeo, Áudio, PDF)</SelectItem>
+                          <SelectItem value="button">Botões Interativos / CTA</SelectItem>
+                          <SelectItem value="poll">Enquete Interativa</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Legenda (Caption)</Label>
-                  <Textarea
-                    rows={3}
-                    value={caption}
-                    onChange={e => setCaption(e.target.value)}
-                  />
-                  <InserirVariavel onInsert={v => setCaption(prev => `${prev}${v}`)} />
-                </div>
-              </div>
-            )}
 
-            {type === 'button' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label>Título</Label>
-                    <Input value={btnTitle} onChange={e => setBtnTitle(e.target.value)} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Rodapé (Footer)</Label>
-                    <Input value={btnFooter} onChange={e => setBtnFooter(e.target.value)} />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Texto Principal (Descrição)</Label>
-                  <Textarea
-                    rows={3}
-                    value={btnDesc}
-                    onChange={e => setBtnDesc(e.target.value)}
-                  />
-                  <InserirVariavel onInsert={v => setBtnDesc(prev => `${prev}${v}`)} />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Botões</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setButtonsList(prev => [
-                          ...prev,
-                          { type: 'url', displayText: 'Acessar Link', url: 'https://', track: true }
-                        ])
-                      }
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1" /> Adicionar Botão
-                    </Button>
-                  </div>
-                  {buttonsList.map((btn, idx) => (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center p-2.5 rounded-lg border border-border/50 bg-muted/20"
-                    >
-                      <div className="sm:col-span-3">
-                        <Select
-                          value={btn.type}
-                          onValueChange={(v: 'reply' | 'url') => {
-                            const next = [...buttonsList]
-                            next[idx] = { ...next[idx], type: v }
-                            setButtonsList(next)
-                          }}
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="url">Link (URL)</SelectItem>
-                            <SelectItem value="reply">Resposta Rápida</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="sm:col-span-4">
-                        <Input
-                          className="h-8 text-xs"
-                          placeholder="Texto do botão"
-                          value={btn.displayText}
-                          onChange={e => {
-                            const next = [...buttonsList]
-                            next[idx] = { ...next[idx], displayText: e.target.value }
-                            setButtonsList(next)
-                          }}
-                        />
-                      </div>
-                      <div className="sm:col-span-4">
-                        {btn.type === 'url' ? (
-                          <Input
-                            className="h-8 text-xs"
-                            placeholder="https://..."
-                            value={btn.url || ''}
-                            onChange={e => {
-                              const next = [...buttonsList]
-                              next[idx] = { ...next[idx], url: e.target.value }
-                              setButtonsList(next)
-                            }}
-                          />
-                        ) : (
-                          <span className="text-xs text-muted-foreground px-2">Botão de resposta</span>
-                        )}
-                      </div>
-                      <div className="sm:col-span-1 flex justify-end">
-                        {buttonsList.length > 1 && (
+                    <div className="flex items-center gap-1">
+                      {blocks.length > 1 && (
+                        <>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-red-400"
-                            onClick={() =>
-                              setButtonsList(prev => prev.filter((_, i) => i !== idx))
-                            }
+                            className="h-7 w-7"
+                            title="Subir bloco"
+                            disabled={idx === 0}
+                            onClick={() => moverBloco(idx, -1)}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <ArrowUp className="w-3.5 h-3.5" />
                           </Button>
-                        )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Descer bloco"
+                            disabled={idx === blocks.length - 1}
+                            onClick={() => moverBloco(idx, 1)}
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Duplicar bloco"
+                        disabled={blocks.length >= MAX_BLOCKS}
+                        onClick={() => duplicarBloco(idx)}
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </Button>
+                      {blocks.length > 1 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive"
+                          title="Remover bloco"
+                          onClick={() => removerBloco(blk.uid)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Conteudo Especifico do Bloco */}
+                  {blk.type === 'text' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs">Texto da Mensagem</Label>
+                        <InserirVariavel
+                          onInsert={token => atualizarBloco(blk.uid, { text: blk.text + token })}
+                        />
+                      </div>
+                      <Textarea
+                        rows={4}
+                        value={blk.text}
+                        onChange={e => atualizarBloco(blk.uid, { text: e.target.value })}
+                        placeholder="Olá {primeiro_nome}! Seja bem-vindo ao {grupo}..."
+                        className="bg-background"
+                      />
+                    </div>
+                  )}
+
+                  {blk.type === 'media' && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Tipo de Mídia</Label>
+                          <Select
+                            value={blk.mediaType}
+                            onValueChange={(v: any) => atualizarBloco(blk.uid, { mediaType: v })}
+                          >
+                            <SelectTrigger className="bg-background">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="image">Imagem</SelectItem>
+                              <SelectItem value="video">Vídeo</SelectItem>
+                              <SelectItem value="audio">Áudio</SelectItem>
+                              <SelectItem value="document">Documento / PDF</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="sm:col-span-2 space-y-1.5">
+                          <Label className="text-xs">URL da Mídia ou Upload</Label>
+                          <div className="flex gap-2">
+                            <Input
+                              value={blk.mediaUrl}
+                              onChange={e => atualizarBloco(blk.uid, { mediaUrl: e.target.value })}
+                              placeholder="https://... ou envie um arquivo"
+                              className="bg-background"
+                            />
+                            <label className="cursor-pointer">
+                              <input
+                                type="file"
+                                className="hidden"
+                                onChange={e => handleUploadArquivoBloco(blk.uid, e, 'media')}
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                asChild
+                                disabled={uploadingKey === `${blk.uid}:media`}
+                              >
+                                <span>
+                                  {uploadingKey === `${blk.uid}:media` ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Upload className="w-4 h-4" />
+                                  )}
+                                </span>
+                              </Button>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Legenda (Caption)</Label>
+                          <InserirVariavel
+                            onInsert={token =>
+                              atualizarBloco(blk.uid, { mediaCaption: blk.mediaCaption + token })
+                            }
+                          />
+                        </div>
+                        <Textarea
+                          rows={3}
+                          value={blk.mediaCaption}
+                          onChange={e => atualizarBloco(blk.uid, { mediaCaption: e.target.value })}
+                          placeholder="Olá {primeiro_nome}! Confira nossa promoção de boas-vindas..."
+                          className="bg-background"
+                        />
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                  )}
 
-            {type === 'poll' && (
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label>Pergunta da Enquete</Label>
-                  <Input value={pollName} onChange={e => setPollName(e.target.value)} />
-                  <InserirVariavel onInsert={v => setPollName(prev => `${prev}${v}`)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Opções (separadas por vírgula)</Label>
-                  <Input value={pollOptions} onChange={e => setPollOptions(e.target.value)} />
-                </div>
-              </div>
-            )}
+                  {blk.type === 'button' && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Título do Card</Label>
+                          <Input
+                            value={blk.btnTitle}
+                            onChange={e => atualizarBloco(blk.uid, { btnTitle: e.target.value })}
+                            placeholder="Bem-vindo(a) ao {grupo}!"
+                            className="bg-background"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Rodapé (Opcional)</Label>
+                          <Input
+                            value={blk.btnFooter}
+                            onChange={e => atualizarBloco(blk.uid, { btnFooter: e.target.value })}
+                            placeholder="Equipe {tag}"
+                            className="bg-background"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Texto Principal (Descrição)</Label>
+                          <InserirVariavel
+                            onInsert={token =>
+                              atualizarBloco(blk.uid, { btnDesc: blk.btnDesc + token })
+                            }
+                          />
+                        </div>
+                        <Textarea
+                          rows={3}
+                          value={blk.btnDesc}
+                          onChange={e => atualizarBloco(blk.uid, { btnDesc: e.target.value })}
+                          className="bg-background"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Imagem de Cabeçalho (Opcional p/ botões reply)</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            value={blk.btnImageUrl}
+                            onChange={e => atualizarBloco(blk.uid, { btnImageUrl: e.target.value })}
+                            placeholder="URL da imagem ou upload"
+                            className="bg-background"
+                          />
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={e => handleUploadArquivoBloco(blk.uid, e, 'button')}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              asChild
+                              disabled={uploadingKey === `${blk.uid}:button`}
+                            >
+                              <span>
+                                {uploadingKey === `${blk.uid}:button` ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Upload className="w-4 h-4" />
+                                )}
+                              </span>
+                            </Button>
+                          </label>
+                        </div>
+                      </div>
 
-            {/* Parâmetros Anti-Ban */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/40">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Botões ({blk.buttonsList.length}/5)</Label>
+                          {blk.buttonsList.length < 5 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() =>
+                                atualizarBloco(blk.uid, {
+                                  buttonsList: [
+                                    ...blk.buttonsList,
+                                    { type: 'url', displayText: 'Saiba Mais', url: 'https://' }
+                                  ]
+                                })
+                              }
+                            >
+                              <Plus className="w-3 h-3 mr-1" /> Botão
+                            </Button>
+                          )}
+                        </div>
+                        {blk.buttonsList.map((btn, bIdx) => (
+                          <div key={bIdx} className="grid grid-cols-12 gap-2 items-center">
+                            <div className="col-span-3">
+                              <Select
+                                value={btn.type}
+                                onValueChange={(v: any) => {
+                                  const clone = [...blk.buttonsList]
+                                  clone[bIdx] = { ...clone[bIdx], type: v }
+                                  atualizarBloco(blk.uid, { buttonsList: clone })
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs bg-background">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="url">Link (URL)</SelectItem>
+                                  <SelectItem value="reply">Resposta Rápida</SelectItem>
+                                  <SelectItem value="copy">Copiar Código</SelectItem>
+                                  <SelectItem value="call">Ligar</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="col-span-4">
+                              <Input
+                                className="h-8 text-xs bg-background"
+                                value={btn.displayText}
+                                onChange={e => {
+                                  const clone = [...blk.buttonsList]
+                                  clone[bIdx] = { ...clone[bIdx], displayText: e.target.value }
+                                  atualizarBloco(blk.uid, { buttonsList: clone })
+                                }}
+                                placeholder="Texto do botão"
+                              />
+                            </div>
+                            <div className="col-span-4">
+                              {btn.type === 'url' && (
+                                <Input
+                                  className="h-8 text-xs bg-background"
+                                  value={btn.url || ''}
+                                  onChange={e => {
+                                    const clone = [...blk.buttonsList]
+                                    clone[bIdx] = { ...clone[bIdx], url: e.target.value }
+                                    atualizarBloco(blk.uid, { buttonsList: clone })
+                                  }}
+                                  placeholder="https://..."
+                                />
+                              )}
+                              {btn.type === 'copy' && (
+                                <Input
+                                  className="h-8 text-xs bg-background"
+                                  value={btn.copyCode || ''}
+                                  onChange={e => {
+                                    const clone = [...blk.buttonsList]
+                                    clone[bIdx] = { ...clone[bIdx], copyCode: e.target.value }
+                                    atualizarBloco(blk.uid, { buttonsList: clone })
+                                  }}
+                                  placeholder="CUPOM10"
+                                />
+                              )}
+                              {btn.type === 'call' && (
+                                <Input
+                                  className="h-8 text-xs bg-background"
+                                  value={btn.phoneNumber || ''}
+                                  onChange={e => {
+                                    const clone = [...blk.buttonsList]
+                                    clone[bIdx] = { ...clone[bIdx], phoneNumber: e.target.value }
+                                    atualizarBloco(blk.uid, { buttonsList: clone })
+                                  }}
+                                  placeholder="5511999999999"
+                                />
+                              )}
+                              {btn.type === 'reply' && (
+                                <Input
+                                  className="h-8 text-xs bg-background"
+                                  value={btn.id || `btn_${bIdx + 1}`}
+                                  onChange={e => {
+                                    const clone = [...blk.buttonsList]
+                                    clone[bIdx] = { ...clone[bIdx], id: e.target.value }
+                                    atualizarBloco(blk.uid, { buttonsList: clone })
+                                  }}
+                                  placeholder="ID resposta"
+                                />
+                              )}
+                            </div>
+                            <div className="col-span-1 flex justify-end">
+                              {blk.buttonsList.length > 1 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-destructive"
+                                  onClick={() =>
+                                    atualizarBloco(blk.uid, {
+                                      buttonsList: blk.buttonsList.filter((_, i) => i !== bIdx)
+                                    })
+                                  }
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {blk.type === 'poll' && (
+                    <div className="space-y-3">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Pergunta da Enquete</Label>
+                          <InserirVariavel
+                            onInsert={token =>
+                              atualizarBloco(blk.uid, { pollName: blk.pollName + token })
+                            }
+                          />
+                        </div>
+                        <Input
+                          value={blk.pollName}
+                          onChange={e => atualizarBloco(blk.uid, { pollName: e.target.value })}
+                          className="bg-background"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Opções ({blk.pollOptions.length}/12)</Label>
+                          {blk.pollOptions.length < 12 && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() =>
+                                atualizarBloco(blk.uid, {
+                                  pollOptions: [
+                                    ...blk.pollOptions,
+                                    `Opção ${blk.pollOptions.length + 1}`
+                                  ]
+                                })
+                              }
+                            >
+                              <Plus className="w-3 h-3 mr-1" /> Opção
+                            </Button>
+                          )}
+                        </div>
+                        {blk.pollOptions.map((opt, oIdx) => (
+                          <div key={oIdx} className="flex gap-2">
+                            <Input
+                              className="h-8 text-xs bg-background"
+                              value={opt}
+                              onChange={e => {
+                                const clone = [...blk.pollOptions]
+                                clone[oIdx] = e.target.value
+                                atualizarBloco(blk.uid, { pollOptions: clone })
+                              }}
+                            />
+                            {blk.pollOptions.length > 2 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive"
+                                onClick={() =>
+                                  atualizarBloco(blk.uid, {
+                                    pollOptions: blk.pollOptions.filter((_, i) => i !== oIdx)
+                                  })
+                                }
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {blocks.length < MAX_BLOCKS && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full border-dashed text-xs h-9"
+                  onClick={adicionarBloco}
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  Adicionar Outro Bloco de Mensagem na Sequência ({blocks.length}/{MAX_BLOCKS})
+                </Button>
+              )}
+            </div>
+
+            {/* Configuracoes Anti-Ban e Rastreamento */}
+            <div className="grid grid-cols-3 gap-3 pt-2 border-t">
               <div className="space-y-1">
-                <Label className="text-xs">Delay Mínimo (segundos)</Label>
+                <Label className="text-xs">Delay Mín (seg)</Label>
                 <Input
                   type="number"
                   min={10}
@@ -733,7 +1163,7 @@ export function PainelBoasVindas({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Delay Máximo (segundos)</Label>
+                <Label className="text-xs">Delay Máx (seg)</Label>
                 <Input
                   type="number"
                   min={15}
@@ -742,7 +1172,7 @@ export function PainelBoasVindas({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Cooldown Anti-Repetição (dias)</Label>
+                <Label className="text-xs">Cooldown (dias)</Label>
                 <Input
                   type="number"
                   min={1}
@@ -752,284 +1182,350 @@ export function PainelBoasVindas({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-              <div className="flex flex-wrap items-center gap-4 text-xs">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={trackLinks}
-                    onChange={e => setTrackLinks(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  <span>Encurtar links c/ ?grupid= curto e UTMs</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={e => setEnabled(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  <span className="font-medium text-amber-300">
-                    Ativar imediatamente nos grupos (desmarque para apenas testar antes)
-                  </span>
-                </label>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t">
+              <div className="flex items-center gap-2">
+                <Switch checked={trackLinks} onCheckedChange={setTrackLinks} />
+                <span className="text-xs">Rastrear cliques nos links (`/l/...?grupid=`) em todos os blocos</span>
               </div>
-
-              <Button onClick={salvarRegra} disabled={salvando} className="gap-2">
-                <Sparkles className="w-4 h-4" />
-                {salvando ? 'Salvando...' : 'Salvar Regra de Boas-Vindas'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Switch checked={enabled} onCheckedChange={setEnabled} />
+                <span className="text-xs font-medium">
+                  {enabled ? 'Regra Ativa (Dispara ao entrar)' : 'Desativada (Apenas Teste)'}
+                </span>
+              </div>
             </div>
+
+            <Button onClick={salvarRegra} disabled={salvando} className="w-full">
+              {salvando ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+              Salvar Regra de Boas-Vindas ({blocks.length} {blocks.length === 1 ? 'Bloco' : 'Blocos'})
+            </Button>
           </CardContent>
         </Card>
 
-        {/* Card Lateral: Laboratório de Teste Seguro Entre Instâncias */}
-        <Card className="border-emerald-500/30 bg-emerald-950/10">
-          <CardHeader className="border-b border-border/40 pb-4">
-            <CardTitle className="text-base flex items-center gap-2 text-emerald-400">
-              <FlaskConical className="w-5 h-5" /> Teste Seguro (Entre Instâncias)
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Valide suas mensagens, mídias e botões enviando de uma instância para outra (ou grupo de teste) sem disparar em grupos finais de clientes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4 space-y-4 text-xs">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Instância que Receberá o Teste</Label>
-              <Select
-                value={instanciaDestinoTeste}
-                onValueChange={setInstanciaDestinoTeste}
+        {/* Coluna Direita: Simulador Entre Instancias & Regras Cadastradas (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Painel de Teste Seguro Entre Instancias */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-primary" />
+                Simulador Seguro (Entre Instâncias / Grupo de Teste)
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Envie a sequência de boas-vindas de uma instância conectada para outra instância ou número de teste sem tocar em grupos finais.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Regra para Testar</Label>
+                <Select
+                  value={regraParaTeste?.id || ''}
+                  onValueChange={id => {
+                    const found = regras.find((r: any) => r.id === id)
+                    setRegraParaTeste(found || null)
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma regra salva..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {regras.map((r: any) => {
+                      const qtdBlocos = Array.isArray(r.blocks) ? r.blocks.length : 1
+                      return (
+                        <SelectItem key={r.id} value={r.id}>
+                          [{r.escopo === 'tag' ? `Tag: ${r.tag?.name}` : `Grupo: ${r.grupo?.name}`}] —{' '}
+                          {qtdBlocos > 1
+                            ? `${qtdBlocos} blocos (${r.blocks.map((b: any) => b.type.toUpperCase()).join(' → ')})`
+                            : r.type.toUpperCase()}
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={modoDestinoTeste === 'instancia' ? 'default' : 'outline'}
+                  onClick={() => setModoDestinoTeste('instancia')}
+                  className="text-xs"
+                >
+                  Para Outra Instância
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={modoDestinoTeste === 'numero' ? 'default' : 'outline'}
+                  onClick={() => setModoDestinoTeste('numero')}
+                  className="text-xs"
+                >
+                  Número / Grupo de Teste
+                </Button>
+              </div>
+
+              {modoDestinoTeste === 'instancia' ? (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Instância que Receberá a Mensagem</Label>
+                  <Select value={targetInstanceName} onValueChange={setTargetInstanceName}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Escolha a instância destino..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {instancias.map((inst: any) => (
+                        <SelectItem key={inst.name} value={inst.name}>
+                          {inst.name} ({inst.phone || 'sem número'})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Telefone ou JID de Grupo de Teste</Label>
+                  <Input
+                    value={targetPhoneOrJid}
+                    onChange={e => setTargetPhoneOrJid(e.target.value)}
+                    placeholder="Ex: 5511999999999"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Nome Simulado p/ Variável {'{nome}'}</Label>
+                <Input
+                  value={targetName}
+                  onChange={e => setTargetName(e.target.value)}
+                  placeholder="Visitante VIP Teste"
+                />
+              </div>
+
+              <Button
+                className="w-full"
+                onClick={dispararTesteSeguro}
+                disabled={!regraParaTeste || Boolean(testandoId)}
               >
-                <SelectTrigger>
-                  <SelectValue placeholder="Escolha a instância destino..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {instancias.map((inst: any) => (
-                    <SelectItem key={inst.name} value={inst.name}>
-                      {inst.connected ? '🟢' : '🔴'} {inst.name} (
-                      {inst.phone || (inst.connected ? 'conectada' : 'desconectada')})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                {testandoId ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4 mr-2" />
+                )}
+                Disparar Teste Agora
+              </Button>
+            </CardContent>
+          </Card>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs">
-                Ou Número / JID de Grupo de Teste (opcional)
-              </Label>
-              <Input
-                placeholder="Ex: 556299947676 (grupos finais são bloqueados)"
-                value={telefoneTesteManual}
-                onChange={e => setTelefoneTesteManual(e.target.value)}
-              />
-            </div>
+          {/* Lista de Regras Cadastradas */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Regras Configuradas ({regras.length})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2.5 max-h-[460px] overflow-y-auto">
+              {regras.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6">
+                  Nenhuma regra configurada ainda. Crie sua primeira regra ao lado!
+                </p>
+              ) : (
+                regras.map((r: any) => {
+                  const ruleBlocks: Array<{ type: string; content: any }> =
+                    Array.isArray(r.blocks) && r.blocks.length > 0
+                      ? r.blocks
+                      : [{ type: r.type, content: r.content }]
 
-            <div className="p-3 rounded-lg border border-border/50 bg-background/40 space-y-1.5 text-muted-foreground">
-              <div className="flex items-center gap-1.5 text-foreground font-medium">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" /> Travas Ativas:
-              </div>
-              <p>• Grupos finais de clientes são bloqueados no modo de teste.</p>
-              <p>• Admins, donos de grupo e Whitelist da Equipe nunca recebem disparo automático.</p>
-              <p>• Você pode testar regras mesmo com elas Desativadas (Off).</p>
-            </div>
-          </CardContent>
-        </Card>
+                  return (
+                    <div
+                      key={r.id}
+                      className="rounded-lg border p-3 space-y-2 bg-card hover:border-primary/40 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant={r.escopo === 'tag' ? 'secondary' : 'outline'} className="text-[10px]">
+                              {r.escopo === 'tag' ? 'TAG' : 'GRUPO'}
+                            </Badge>
+                            <span className="text-xs font-semibold">
+                              {r.escopo === 'tag' ? r.tag?.name : r.grupo?.name}
+                            </span>
+                            {ruleBlocks.length > 1 ? (
+                              <Badge variant="default" className="text-[10px] uppercase">
+                                {ruleBlocks.length} BLOCOS:{' '}
+                                {ruleBlocks.map(b => b.type).join(' → ')}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] uppercase">
+                                {r.type}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            Delay: {r.delayMinSec}s–{r.delayMaxSec}s • Cooldown: {r.cooldownDays}d • Entregues:{' '}
+                            {r.stats?.sent || 0}
+                          </p>
+                        </div>
+
+                        <Badge variant={r.enabled ? 'default' : 'secondary'} className="text-[10px]">
+                          {r.enabled ? 'Ativa' : 'Em Teste / Off'}
+                        </Badge>
+                      </div>
+
+                      {/* Previa dos blocos da regra */}
+                      <div className="space-y-1 rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                        {ruleBlocks.map((b, bIdx) => (
+                          <div key={bIdx} className="truncate">
+                            <span className="font-semibold text-foreground/80">
+                              #{bIdx + 1} [{String(b.type).toUpperCase()}]:
+                            </span>{' '}
+                            {resumirBloco(b)}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t">
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs px-2"
+                            onClick={() => editarRegra(r)}
+                          >
+                            Editar
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs px-2"
+                            onClick={() => setRegraParaTeste(r)}
+                          >
+                            <FlaskConical className="w-3 h-3 mr-1" /> Testar
+                          </Button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            variant={r.enabled ? 'secondary' : 'default'}
+                            size="sm"
+                            className="h-7 text-xs px-2"
+                            onClick={() => alternarAtivacao(r, !r.enabled)}
+                          >
+                            <Power className="w-3 h-3 mr-1" />
+                            {r.enabled ? 'Desativar' : 'Ativar'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            onClick={() => excluirRegra(r.id)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {/* Lista de Regras Cadastradas */}
-      <Card className="border-border/40 bg-card/40">
-        <CardHeader className="border-b border-border/40 pb-4 flex flex-row items-center justify-between">
+      {/* Fila e Historico Recente de Boas-Vindas */}
+      <Card>
+        <CardHeader className="pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <CardTitle className="text-lg">Regras Configuradas (Por Tag e Por Grupo)</CardTitle>
-            <CardDescription>
-              Ative, desative ou dispare um teste seguro entre instâncias em qualquer regra abaixo.
-            </CardDescription>
-          </div>
-          <Button variant="outline" size="sm" onClick={carregar} className="gap-1.5">
-            <RefreshCw className="w-3.5 h-3.5" /> Atualizar
-          </Button>
-        </CardHeader>
-        <CardContent className="pt-4 space-y-3">
-          {carregando && <p className="text-sm text-muted-foreground">Carregando regras...</p>}
-          {!carregando && regras.length === 0 && (
-            <div className="py-8 text-center text-sm text-muted-foreground border border-dashed border-border/50 rounded-lg">
-              Nenhuma regra de boas-vindas cadastrada ainda. Crie uma acima para testar!
-            </div>
-          )}
-
-          {regras.map(r => (
-            <div
-              key={r.id}
-              className="p-4 rounded-xl border border-border/50 bg-muted/20 flex flex-wrap items-center justify-between gap-4"
-            >
-              <div className="space-y-1 max-w-2xl">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={r.enabled ? 'default' : 'secondary'}>
-                    {r.enabled ? 'ATIVA' : 'DESATIVADA (MODO SEGURO)'}
-                  </Badge>
-                  <Badge variant="outline">
-                    {r.escopo === 'tag' ? `Tag: ${r.tag?.name || r.tagId}` : `Grupo: ${r.grupo?.name || r.groupId}`}
-                  </Badge>
-                  <Badge variant="outline" className="uppercase">
-                    {r.type}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    Delay: {r.delayMinSec}s–{r.delayMaxSec}s • Cooldown: {r.cooldownDays}d • Chip:{' '}
-                    {r.senderInstance || 'Padrão do grupo'}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
-                  {r.content?.text ||
-                    r.content?.caption ||
-                    r.content?.description ||
-                    r.content?.name ||
-                    JSON.stringify(r.content)}
-                </p>
-                <div className="flex items-center gap-3 text-xs pt-1">
-                  <span className="text-emerald-400">Enviados: {r.stats?.sent || 0}</span>
-                  <span className="text-amber-400">Na fila: {r.stats?.pending || 0}</span>
-                  <span className="text-red-400">Falhas: {r.stats?.error || 0}</span>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1.5 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
-                  disabled={testandoId === r.id}
-                  onClick={() => dispararTesteEntreInstancias(r)}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  {testandoId === r.id ? 'Testando...' : 'Testar Entre Instâncias'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant={r.enabled ? 'secondary' : 'default'}
-                  className="gap-1.5"
-                  onClick={() => alternarStatusRegra(r)}
-                >
-                  <Power className="w-3.5 h-3.5" />
-                  {r.enabled ? 'Desativar' : 'Ativar'}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => editarRegra(r)}>
-                  <Edit3 className="w-3.5 h-3.5" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
-                  onClick={() => setRegraParaExcluir(r)}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Fila e Histórico de Disparos */}
-      <Card className="border-border/40 bg-card/40">
-        <CardHeader className="border-b border-border/40 pb-4 flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Clock className="w-5 h-5" /> Fila &amp; Histórico de Boas-Vindas
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Clock className="w-4 h-4 text-primary" />
+              Fila e Histórico de Disparos no Privado ({fila.length})
             </CardTitle>
-            <CardDescription>
-              Últimos disparos automáticos e testes entre instâncias.
+            <CardDescription className="text-xs">
+              Acompanhe envios agendados, testes realizados e entregas concluídas.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            {resumo.errosTotal > 0 && (
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => controlarFila('retry_errors')}>
+                Retentar Erros ({resumo.errosTotal})
+              </Button>
+            )}
             {resumo.pendentesFila > 0 && (
               <Button
                 variant="outline"
                 size="sm"
+                className="h-7 text-xs text-destructive"
                 onClick={() => controlarFila('cancel_pending')}
               >
                 Cancelar Pendentes ({resumo.pendentesFila})
               </Button>
             )}
-            {resumo.errosTotal > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => controlarFila('retry_errors')}
-              >
-                Retentar Erros ({resumo.errosTotal})
-              </Button>
-            )}
           </div>
         </CardHeader>
-        <CardContent className="pt-4 space-y-2">
-          {fila.length === 0 && (
-            <p className="text-sm text-muted-foreground py-6 text-center">
-              Nenhum disparo registrado ainda.
+        <CardContent>
+          {fila.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-6">
+              Nenhum disparo de boas-vindas registrado ainda.
             </p>
-          )}
-          {fila.slice(0, 30).map(item => (
-            <div
-              key={item.id}
-              className="p-3 rounded-lg border border-border/40 bg-muted/10 flex flex-wrap items-center justify-between gap-2 text-xs"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                {item.status === 'sent' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                {item.status === 'pending' && <Clock className="w-4 h-4 text-amber-400" />}
-                {item.status === 'error' && <XCircle className="w-4 h-4 text-red-400" />}
-                {item.status === 'skipped' && <AlertTriangle className="w-4 h-4 text-muted-foreground" />}
-                <span className="font-medium">{item.displayName || item.phone}</span>
-                <span className="text-muted-foreground">({item.phone})</span>
-                {item.isTest && (
-                  <Badge variant="outline" className="text-emerald-400 border-emerald-500/40">
-                    TESTE ENTRE INSTÂNCIAS
-                  </Badge>
-                )}
-                <span className="text-muted-foreground">• Grupo: {item.grupoNome}</span>
-                {item.instancia && (
-                  <span className="text-muted-foreground">• Chip: {item.instancia}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 text-muted-foreground">
-                {item.errorMessage && (
-                  <span className="text-red-400 max-w-xs truncate">{item.errorMessage}</span>
-                )}
-                <span>
-                  {new Date(item.sentAt || item.scheduledAt).toLocaleString('pt-BR')}
-                </span>
-              </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 pr-3">Membro / Destino</th>
+                    <th className="py-2 pr-3">Grupo Origem</th>
+                    <th className="py-2 pr-3">Tipo</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Agendado / Enviado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {fila.slice(0, 30).map((d: any) => (
+                    <tr key={d.id}>
+                      <td className="py-2 pr-3 font-medium">
+                        {d.displayName || d.phone}
+                        <span className="block text-[10px] text-muted-foreground">{d.phone}</span>
+                      </td>
+                      <td className="py-2 pr-3">
+                        {d.grupoNome}
+                        {d.isTest && (
+                          <Badge variant="outline" className="ml-1.5 text-[9px] border-primary/40 text-primary">
+                            TESTE
+                          </Badge>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 uppercase">{d.type}</td>
+                      <td className="py-2 pr-3">
+                        {d.status === 'sent' && (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Enviado
+                          </span>
+                        )}
+                        {d.status === 'pending' && (
+                          <span className="inline-flex items-center gap-1 text-amber-600 font-medium">
+                            <Clock className="w-3.5 h-3.5" /> Na Fila
+                          </span>
+                        )}
+                        {d.status === 'error' && (
+                          <span
+                            className="inline-flex items-center gap-1 text-destructive font-medium"
+                            title={d.errorMessage || ''}
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Erro
+                          </span>
+                        )}
+                        {d.status === 'skipped' && (
+                          <span className="text-muted-foreground">Ignorado ({d.errorMessage || 'Cancelado'})</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-muted-foreground">
+                        {new Date(d.sentAt || d.scheduledAt).toLocaleString('pt-BR')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          )}
         </CardContent>
       </Card>
-
-      {/* Confirmação de Exclusão de Regra */}
-      <AlertDialog open={!!regraParaExcluir} onOpenChange={(open) => !open && setRegraParaExcluir(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir Regra de Boas-Vindas</AlertDialogTitle>
-            <AlertDialogDescription>
-              Deseja realmente excluir esta regra de boas-vindas e limpar sua fila pendente? Esta ação não pode ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setRegraParaExcluir(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => {
-                if (!regraParaExcluir) return
-                const r = regraParaExcluir
-                setRegraParaExcluir(null)
-                await executarExclusaoRegra(r)
-              }}
-            >
-              Excluir Regra
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
-

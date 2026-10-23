@@ -4,17 +4,18 @@ import { isAuthenticated } from '@/lib/auth'
 import { validateScheduleContent } from '@/lib/schedule-types'
 import { aplicarRastreio } from '@/lib/tracked-links'
 import {
+  MAX_WELCOME_BLOCKS,
+  extractWelcomeBlocks,
   cleanPhoneDigits,
+  isTestGroupName,
   listarInstanciasEvolution,
   selecionarInstanciaRemetenteConectada,
-  sendEvolutionWelcomeMessage
+  sendEvolutionWelcomeSequence
 } from '@shared/welcome'
-import {
-  montarContextoGrupo,
-  resolverConteudoAgendamento
-} from '@shared/variables'
+import { montarContextoGrupo } from '@shared/variables'
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || ''
+const VALID_TYPES = ['text', 'media', 'button', 'poll'] as const
 
 function baseUrlDoPedido(request: Request) {
   return (
@@ -29,6 +30,29 @@ function urlAbsolutaDeMidia(valor: string, baseUrl: string) {
   if (!v || /^https?:\/\//i.test(v) || v.startsWith('data:')) return v
   if (!baseUrl) return v
   return v.startsWith('/') ? `${baseUrl}${v}` : `${baseUrl}/${v}`
+}
+
+async function verificarBloqueioGrupoFinal(groupId?: string | null, tagId?: string | null): Promise<string | null> {
+  if (groupId) {
+    const grp = await prisma.group.findUnique({
+      where: { id: groupId },
+      select: { name: true }
+    })
+    if (grp && !isTestGroupName(grp.name)) {
+      return `Bloqueio de segurança: não é permitido ativar boas-vindas no grupo final "${grp.name}". Ative apenas em grupos de teste.`
+    }
+  }
+  if (tagId) {
+    const tagGroups = await prisma.groupTag.findMany({
+      where: { tagId },
+      include: { group: { select: { name: true } } }
+    })
+    const nonTest = tagGroups.find(tg => tg.group && !isTestGroupName(tg.group.name))
+    if (nonTest?.group) {
+      return `Bloqueio de segurança: a Tag contém o grupo final "${nonTest.group.name}". Ative regras apenas em grupos/tags de teste.`
+    }
+  }
+  return null
 }
 
 export async function GET(request: Request) {
@@ -124,6 +148,8 @@ export async function GET(request: Request) {
         parsedContent = { text: r.content }
       }
 
+      const blocks = extractWelcomeBlocks(r.type, parsedContent)
+
       return {
         id: r.id,
         escopo: r.tagId ? 'tag' : 'group',
@@ -132,6 +158,7 @@ export async function GET(request: Request) {
         enabled: r.enabled,
         type: r.type,
         content: parsedContent,
+        blocks,
         delayMinSec: r.delayMinSec,
         delayMaxSec: r.delayMaxSec,
         cooldownDays: r.cooldownDays,
@@ -197,7 +224,7 @@ export async function POST(request: Request) {
     const action = String(body.action || 'upsert')
     const baseUrl = baseUrlDoPedido(request)
 
-    // 1. Criar ou Atualizar Regra de Boas-Vindas (por Grupo ou por Tag)
+    // 1. Criar ou Atualizar Regra de Boas-Vindas (por Grupo ou por Tag, 1 ou multiplos blocos)
     if (action === 'upsert') {
       let groupId: string | null = body.groupId ? String(body.groupId).trim() : null
       let tagId: string | null = body.tagId ? String(body.tagId).trim() : null
@@ -214,44 +241,96 @@ export async function POST(request: Request) {
         )
       }
 
-      const type = String(body.type || 'text')
-      if (!['text', 'media', 'button', 'poll'].includes(type)) {
+      const enabled = body.enabled !== undefined ? Boolean(body.enabled) : false
+      if (enabled) {
+        const bloqueio = await verificarBloqueioGrupoFinal(groupId, tagId)
+        if (bloqueio) {
+          return NextResponse.json({ error: bloqueio }, { status: 403 })
+        }
+      }
+
+      const defaultType = String(body.type || 'text')
+      const rawContent =
+        typeof body.content === 'string'
+          ? JSON.parse(body.content || '{}')
+          : { ...(body.content || {}) }
+
+      const trackLinks =
+        body.trackLinks !== undefined
+          ? Boolean(body.trackLinks)
+          : rawContent.trackLinks !== undefined
+            ? Boolean(rawContent.trackLinks)
+            : true
+
+      // Extrai blocos: pode vir em body.blocks, body.content.blocks ou como 1 bloco unico
+      const candidateBlocks = Array.isArray(body.blocks)
+        ? body.blocks
+        : Array.isArray(rawContent.blocks)
+          ? rawContent.blocks
+          : null
+
+      if (candidateBlocks && candidateBlocks.length > MAX_WELCOME_BLOCKS) {
         return NextResponse.json(
-          { error: 'Tipo inválido. Use text, media, button ou poll.' },
+          { error: `Limite máximo de ${MAX_WELCOME_BLOCKS} blocos de mensagem por regra.` },
           { status: 400 }
         )
       }
 
-      const rawContent =
-        typeof body.content === 'string'
-          ? JSON.parse(body.content)
-          : { ...(body.content || {}) }
-
-      if (body.trackLinks !== undefined) {
-        rawContent.trackLinks = Boolean(body.trackLinks)
-      }
-
-      const problema = validateScheduleContent(type as any, rawContent)
-      if (problema) {
-        return NextResponse.json({ error: problema }, { status: 400 })
-      }
-
-      const rastreado = await aplicarRastreio(
-        type,
-        rawContent,
-        baseUrl,
-        groupId || undefined
+      const rawBlocks = extractWelcomeBlocks(
+        defaultType,
+        candidateBlocks ? { blocks: candidateBlocks } : rawContent
       )
+
+      const processedBlocks: Array<{ type: string; content: Record<string, any> }> = []
+      let totalLinksCriados = 0
+
+      for (let idx = 0; idx < rawBlocks.length; idx++) {
+        const blk = rawBlocks[idx]
+        const blkType = String(blk.type || defaultType)
+        if (!VALID_TYPES.includes(blkType as any)) {
+          return NextResponse.json(
+            { error: `Bloco #${idx + 1}: Tipo inválido "${blkType}". Use text, media, button ou poll.` },
+            { status: 400 }
+          )
+        }
+
+        const blkContent = { ...(blk.content || {}), trackLinks }
+        const problema = validateScheduleContent(blkType as any, blkContent)
+        if (problema) {
+          return NextResponse.json(
+            { error: rawBlocks.length > 1 ? `Bloco #${idx + 1}: ${problema}` : problema },
+            { status: 400 }
+          )
+        }
+
+        const rastreado = await aplicarRastreio(
+          blkType,
+          blkContent,
+          baseUrl,
+          groupId || undefined
+        )
+        totalLinksCriados += rastreado.links.length
+        processedBlocks.push({
+          type: blkType,
+          content: rastreado.content
+        })
+      }
+
+      const primaryBlock = processedBlocks[0]
+      const finalStoredContent = {
+        ...primaryBlock.content,
+        trackLinks,
+        blocks: processedBlocks
+      }
 
       const delayMinSec = Math.max(10, Math.min(3600, Number(body.delayMinSec ?? 45)))
       const delayMaxSec = Math.max(delayMinSec, Math.min(7200, Number(body.delayMaxSec ?? 150)))
       const cooldownDays = Math.max(1, Math.min(365, Number(body.cooldownDays ?? 30)))
-      const enabled = body.enabled !== undefined ? Boolean(body.enabled) : false
       const senderInstance = body.senderInstance ? String(body.senderInstance).trim() : null
 
       const dataPayload = {
-        type,
-        content: JSON.stringify(rastreado.content),
+        type: primaryBlock.type,
+        content: JSON.stringify(finalStoredContent),
         enabled,
         delayMinSec,
         delayMaxSec,
@@ -274,7 +353,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         rule,
-        linksCriados: rastreado.links.length
+        blocksCount: processedBlocks.length,
+        linksCriados: totalLinksCriados
       })
     }
 
@@ -306,6 +386,13 @@ export async function POST(request: Request) {
 
       const nextEnabled =
         body.enabled !== undefined ? Boolean(body.enabled) : !existing.enabled
+
+      if (nextEnabled) {
+        const bloqueio = await verificarBloqueioGrupoFinal(existing.groupId, existing.tagId)
+        if (bloqueio) {
+          return NextResponse.json({ error: bloqueio }, { status: 403 })
+        }
+      }
 
       const updated = await prisma.welcomeRule.update({
         where: { id: existing.id },
@@ -340,7 +427,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // 4. Disparo de Teste Seguro (Entre Instancias ou Grupo de Teste)
+    // 4. Disparo de Teste Seguro (Entre Instancias ou Grupo de Teste, 1 ou multiplos blocos)
     if (action === 'test') {
       const instances = await listarInstanciasEvolution()
       const ruleId = body.ruleId || body.id
@@ -370,8 +457,6 @@ export async function POST(request: Request) {
         )
       }
 
-      // Resolve o destinatario do teste: pode ser targetInstanceName (envia para o numero da outra instancia)
-      // ou targetPhoneOrJid (numero ou grupo de teste).
       let recipient = ''
       let targetLabel = String(body.targetName || 'Teste Entre Instâncias').trim()
 
@@ -388,11 +473,10 @@ export async function POST(request: Request) {
       } else if (body.targetPhoneOrJid) {
         const rawTarget = String(body.targetPhoneOrJid).trim()
         if (rawTarget.endsWith('@g.us')) {
-          // Trava de seguranca: so permite testar em grupo se for explicitamente um grupo de teste
           const targetGroup = await prisma.group.findFirst({
             where: { evolutionGroupId: rawTarget }
           })
-          if (targetGroup && !/teste|test/i.test(targetGroup.name)) {
+          if (targetGroup && !isTestGroupName(targetGroup.name)) {
             return NextResponse.json(
               {
                 error:
@@ -454,6 +538,8 @@ export async function POST(request: Request) {
         rawContent = { text: rule.content }
       }
 
+      const blocks = extractWelcomeBlocks(rule.type, rawContent)
+
       const ctx = await montarContextoGrupo(prisma, sampleGroup, {
         baseUrl,
         tag: rule.tag || undefined,
@@ -462,15 +548,14 @@ export async function POST(request: Request) {
         memberPhone: cleanPhoneDigits(recipient) || recipient
       })
 
-      const resolvedContent = resolverConteudoAgendamento(rule.type, rawContent, ctx)
-
-      const sendRes = await sendEvolutionWelcomeMessage(
+      const sendRes = await sendEvolutionWelcomeSequence(
         EVOLUTION_API_URL,
         senderInst.token,
         recipient,
-        rule.type,
-        resolvedContent,
-        (u: string) => urlAbsolutaDeMidia(u, baseUrl)
+        blocks,
+        ctx,
+        (u: string) => urlAbsolutaDeMidia(u, baseUrl),
+        { isTest: true }
       )
 
       const dispatchLog = await prisma.welcomeDispatch.create({
@@ -486,7 +571,7 @@ export async function POST(request: Request) {
           attempts: 1,
           errorMessage: sendRes.ok
             ? null
-            : `HTTP ${sendRes.status}: ${(sendRes.body || sendRes.error || '').slice(0, 200)}`,
+            : `HTTP ${sendRes.status}: ${(sendRes.error || sendRes.body || '').slice(0, 200)}`,
           isTest: true
         }
       })
@@ -496,7 +581,7 @@ export async function POST(request: Request) {
           {
             ok: false,
             error: `Falha no envio de teste (HTTP ${sendRes.status})`,
-            details: sendRes.body || sendRes.error,
+            details: sendRes.error || sendRes.body,
             dispatch: dispatchLog
           },
           { status: 502 }
@@ -507,7 +592,9 @@ export async function POST(request: Request) {
         ok: true,
         senderInstance: senderInst.name,
         recipient,
-        resolvedContent,
+        blocksSent: sendRes.blocksSent,
+        resolvedBlocks: sendRes.resolvedBlocks,
+        resolvedContent: sendRes.resolvedContent,
         dispatch: dispatchLog
       })
     }
