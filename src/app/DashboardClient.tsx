@@ -2,9 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import BulkEditModal from './BulkEditModal'
-import PainelAuditoriaMembros from '@/components/PainelAuditoriaMembros'
-import PainelAgendaCampanhas from '@/components/PainelAgendaCampanhas'
-import { PainelBoasVindas } from '@/components/PainelBoasVindas'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,13 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/use-toast'
 import {
   RefreshCcw,
   Plus,
   QrCode,
-  Users,
   ClipboardPaste,
   Edit,
   CheckSquare,
@@ -37,9 +32,6 @@ import {
   Tag as TagIcon,
   Search,
   MoreHorizontal,
-  ShieldCheck,
-  CalendarClock,
-  Sparkles,
 } from 'lucide-react'
 
 // Submódulos SRP do Dashboard
@@ -97,7 +89,6 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
   const [searchTermPaste, setSearchTermPaste] = useState('')
 
   // Mass Create State
-  const [visaoAtiva, setVisaoAtiva] = useState<string>('grupos')
   const [isMassCreateModalOpen, setIsMassCreateModalOpen] = useState(false)
   const [selectedGroupsForCreate, setSelectedGroupsForCreate] = useState<string[]>([])
   const [isCreating, setIsCreating] = useState(false)
@@ -698,242 +689,205 @@ export default function DashboardClient({ initialGroups }: { initialGroups: any[
         totalDeactivated={totalDeactivated}
       />
 
-      {/* 3. Seletor de Visão Principal padronizado com Tabs */}
-      <Tabs value={visaoAtiva} onValueChange={setVisaoAtiva} className="w-full space-y-4">
-        <TabsList className="bg-muted/40 p-1 border border-border/40 flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="grupos" className="gap-1.5">
-            <Users className="w-4 h-4" /> Meus Grupos ({gruposDaInstancia.length})
-          </TabsTrigger>
-          <TabsTrigger value="agenda" className="gap-1.5">
-            <CalendarClock className="w-4 h-4" /> Agenda &amp; Fila Global ({totalPending})
-          </TabsTrigger>
-          <TabsTrigger value="auditoria" className="gap-1.5">
-            <ShieldCheck className="w-4 h-4" /> Auditoria de Membros &amp; DDDs
-          </TabsTrigger>
-          <TabsTrigger value="boas_vindas" className="gap-1.5">
-            <Sparkles className="w-4 h-4" /> Boas-Vindas (PV)
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="agenda" className="mt-4">
-          <PainelAgendaCampanhas
-            tags={tagsDoPainel}
-            instances={instances}
-            onChanged={() => window.location.reload()}
-          />
-        </TabsContent>
-
-        <TabsContent value="boas_vindas" className="mt-4">
-          <PainelBoasVindas groups={groups} tags={tagsDoPainel} />
-        </TabsContent>
-
-        <TabsContent value="auditoria" className="mt-4">
-          <PainelAuditoriaMembros
-            tagId={
-              tagFiltro !== 'todas' && tagFiltro !== 'sem_tag' ? tagFiltro : undefined
-            }
-          />
-        </TabsContent>
-
-        <TabsContent value="grupos" className="space-y-4 mt-4">
-          <div className="space-y-3">
-            <div className="flex items-baseline justify-between gap-4">
-              <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
-              <span className="text-sm text-muted-foreground whitespace-nowrap">
-                {termoBusca
-                  ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
-                  : `${gruposDaInstancia.length} grupo(s)`}
-              </span>
-            </div>
-
-            {/* Busca e filtro por tags */}
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <Input
-                  placeholder="Buscar grupo pelo nome ou descrição…"
-                  value={buscaGrupos}
-                  onChange={(e) => setBuscaGrupos(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
-
-              {tagsDoPainel.length > 0 && (
-                <Select value={tagFiltro} onValueChange={setTagFiltro}>
-                  <SelectTrigger className="w-full sm:w-[200px]">
-                    <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-                    <SelectValue placeholder="Todas as tags" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todas">Todas as tags</SelectItem>
-                    <SelectItem value="sem_tag">Sem tag</SelectItem>
-                    {tagsDoPainel.map((t) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        <span className="flex items-center gap-2">
-                          <span
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: t.color || '#6366f1' }}
-                          />
-                          {t.name}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={handleSyncGroups}
-                  className="flex-1 sm:flex-none"
-                >
-                  <RefreshCcw className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Sincronizar</span>
-                </Button>
-
-                <Button
-                  onClick={() => setIsModalOpen(true)}
-                  className="flex-1 sm:flex-none"
-                >
-                  <Plus className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Novo grupo</span>
-                </Button>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" title="Mais ações">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-60">
-                    <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setModoSelecao(!modoSelecao)
-                        setSelecionados([])
-                      }}
-                    >
-                      <PencilRuler className="w-4 h-4 mr-2" />
-                      {modoSelecao
-                        ? 'Cancelar seleção'
-                        : 'Editar nome, foto e descrição'}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleMassCreateClick}>
-                      <Edit className="w-4 h-4 mr-2" />
-                      Agendar em massa
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleMassPasteClick}>
-                      <ClipboardPaste className="w-4 h-4 mr-2" />
-                      Colar agendamentos (JSON)
-                    </DropdownMenuItem>
-
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel>Instância</DropdownMenuLabel>
-                    <DropdownMenuItem onClick={handleOpenQrCode}>
-                      <QrCode className="w-4 h-4 mr-2" />
-                      QR Code de conexão
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
-                      <Plus className="w-4 h-4 mr-2" />
-                      Nova instância
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
+      {/* 3. Gestão de Meus Grupos */}
+      <div className="space-y-4">
+        <div className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Meus grupos</h2>
+            <span className="text-sm text-muted-foreground whitespace-nowrap">
+              {termoBusca
+                ? `${filteredGroups.length} de ${gruposDaInstancia.length}`
+                : `${gruposDaInstancia.length} grupo(s)`}
+            </span>
           </div>
 
-          {modoSelecao && (
-            <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setSelecionados(
-                      selecionados.length === filteredGroups.length
-                        ? []
-                        : filteredGroups.map((g: any) => g.id)
-                    )
-                  }
-                >
-                  {selecionados.length === filteredGroups.length &&
-                  filteredGroups.length > 0 ? (
-                    <CheckSquare className="w-4 h-4 mr-2" />
-                  ) : (
-                    <Square className="w-4 h-4 mr-2" />
-                  )}
-                  {selecionados.length === filteredGroups.length &&
-                  filteredGroups.length > 0
-                    ? 'Desmarcar todos'
-                    : 'Marcar todos'}
-                </Button>
-                <span className="text-sm text-muted-foreground">
-                  {selecionados.length} grupo(s) selecionado(s)
-                </span>
-
-                {tagsDoPainel.map((t) => {
-                  const idsAqui = t.grupos
-                    .map((g: any) => g.id)
-                    .filter((id: string) => filteredGroups.some((fg: any) => fg.id === id))
-                  if (idsAqui.length === 0) return null
-                  const todosJa = idsAqui.every((id: string) =>
-                    selecionados.includes(id)
-                  )
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() =>
-                        setSelecionados(
-                          todosJa
-                            ? selecionados.filter((id) => !idsAqui.includes(id))
-                            : Array.from(new Set([...selecionados, ...idsAqui]))
-                        )
-                      }
-                      className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
-                        todosJa
-                          ? 'border-transparent text-white'
-                          : 'border-border/60 bg-muted/20 hover:bg-muted/40'
-                      }`}
-                      style={todosJa ? { backgroundColor: t.color } : undefined}
-                      title={`Marcar os ${idsAqui.length} grupo(s) da tag ${t.name}`}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{
-                          backgroundColor: todosJa
-                            ? 'rgba(255,255,255,.85)'
-                            : t.color,
-                        }}
-                      />
-                      {t.name}
-                      <span className="opacity-70">{idsAqui.length}</span>
-                    </button>
-                  )
-                })}
-              </div>
-              <Button
-                disabled={selecionados.length === 0}
-                onClick={() => setBulkAberto(true)}
-              >
-                <PencilRuler className="w-4 h-4 mr-2" />
-                Editar selecionados
-              </Button>
+          {/* Busca e filtro por tags */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Buscar grupo pelo nome ou descrição…"
+                value={buscaGrupos}
+                onChange={(e) => setBuscaGrupos(e.target.value)}
+                className="pl-9"
+              />
             </div>
-          )}
 
-          {/* Grid de Cards dos Grupos */}
-          <GroupCardGrid
-            filteredGroups={filteredGroups}
-            modoSelecao={modoSelecao}
-            selecionados={selecionados}
-            setSelecionados={setSelecionados}
-            onOpenNewGroup={() => setIsModalOpen(true)}
-          />
-        </TabsContent>
-      </Tabs>
+            {tagsDoPainel.length > 0 && (
+              <Select value={tagFiltro} onValueChange={setTagFiltro}>
+                <SelectTrigger className="w-full sm:w-[200px]">
+                  <TagIcon className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Todas as tags" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as tags</SelectItem>
+                  <SelectItem value="sem_tag">Sem tag</SelectItem>
+                  {tagsDoPainel.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: t.color || '#6366f1' }}
+                        />
+                        {t.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={handleSyncGroups}
+                className="flex-1 sm:flex-none"
+              >
+                <RefreshCcw className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Sincronizar</span>
+              </Button>
+
+              <Button
+                onClick={() => setIsModalOpen(true)}
+                className="flex-1 sm:flex-none"
+              >
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Novo grupo</span>
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" title="Mais ações">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>Em vários grupos</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setModoSelecao(!modoSelecao)
+                      setSelecionados([])
+                    }}
+                  >
+                    <PencilRuler className="w-4 h-4 mr-2" />
+                    {modoSelecao
+                      ? 'Cancelar seleção'
+                      : 'Editar nome, foto e descrição'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassCreateClick}>
+                    <Edit className="w-4 h-4 mr-2" />
+                    Agendar em massa
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleMassPasteClick}>
+                    <ClipboardPaste className="w-4 h-4 mr-2" />
+                    Colar agendamentos (JSON)
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Instância</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={handleOpenQrCode}>
+                    <QrCode className="w-4 h-4 mr-2" />
+                    QR Code de conexão
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsInstanceModalOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Nova instância
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </div>
+
+        {modoSelecao && (
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-primary/40 bg-primary/5">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setSelecionados(
+                    selecionados.length === filteredGroups.length
+                      ? []
+                      : filteredGroups.map((g: any) => g.id)
+                  )
+                }
+              >
+                {selecionados.length === filteredGroups.length &&
+                filteredGroups.length > 0 ? (
+                  <CheckSquare className="w-4 h-4 mr-2" />
+                ) : (
+                  <Square className="w-4 h-4 mr-2" />
+                )}
+                {selecionados.length === filteredGroups.length &&
+                filteredGroups.length > 0
+                  ? 'Desmarcar todos'
+                  : 'Marcar todos'}
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {selecionados.length} grupo(s) selecionado(s)
+              </span>
+
+              {tagsDoPainel.map((t) => {
+                const idsAqui = t.grupos
+                  .map((g: any) => g.id)
+                  .filter((id: string) => filteredGroups.some((fg: any) => fg.id === id))
+                if (idsAqui.length === 0) return null
+                const todosJa = idsAqui.every((id: string) =>
+                  selecionados.includes(id)
+                )
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() =>
+                      setSelecionados(
+                        todosJa
+                          ? selecionados.filter((id) => !idsAqui.includes(id))
+                          : Array.from(new Set([...selecionados, ...idsAqui]))
+                      )
+                    }
+                    className={`text-xs px-2 py-1 rounded-lg border flex items-center gap-1.5 ${
+                      todosJa
+                        ? 'border-transparent text-white'
+                        : 'border-border/60 bg-muted/20 hover:bg-muted/40'
+                    }`}
+                    style={todosJa ? { backgroundColor: t.color } : undefined}
+                    title={`Marcar os ${idsAqui.length} grupo(s) da tag ${t.name}`}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{
+                        backgroundColor: todosJa
+                          ? 'rgba(255,255,255,.85)'
+                          : t.color,
+                      }}
+                    />
+                    {t.name}
+                    <span className="opacity-70">{idsAqui.length}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <Button
+              disabled={selecionados.length === 0}
+              onClick={() => setBulkAberto(true)}
+            >
+              <PencilRuler className="w-4 h-4 mr-2" />
+              Editar selecionados
+            </Button>
+          </div>
+        )}
+
+        {/* Grid de Cards dos Grupos */}
+        <GroupCardGrid
+          filteredGroups={filteredGroups}
+          modoSelecao={modoSelecao}
+          selecionados={selecionados}
+          setSelecionados={setSelecionados}
+          onOpenNewGroup={() => setIsModalOpen(true)}
+        />
+      </div>
 
       {/* 4. Modais padronizados com Header, Body e Footer fixos */}
       <MassPasteModal

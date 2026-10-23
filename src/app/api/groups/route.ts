@@ -3,6 +3,22 @@ import { prisma } from '@/lib/prisma'
 import { isAuthenticated } from '@/lib/auth'
 import { getInstanceToken, evolutionCall } from '@/lib/evolution'
 
+const SLUGS_RESERVADOS = new Set([
+  'agenda',
+  'auditoria',
+  'boas-vindas',
+  'tags',
+  'relatorios',
+  'links',
+  'chaves',
+  'login',
+  'api',
+  'l',
+  'g',
+  'documentacao',
+  'api-docs'
+])
+
 /**
  * @swagger
  * /api/groups:
@@ -89,6 +105,14 @@ export async function POST(request: Request) {
   try {
     const data = await request.json()
     const { name, slug, description, picture, participants, instanceName } = data
+    const cleanSlug = String(slug || '').trim().toLowerCase()
+
+    if (!cleanSlug || SLUGS_RESERVADOS.has(cleanSlug)) {
+      return NextResponse.json(
+        { error: `O slug "${slug}" é reservado pelo sistema. Escolha outro identificador para o grupo.` },
+        { status: 400 }
+      )
+    }
     
     const apiUrl = process.env.EVOLUTION_API_URL
     const apiKey = process.env.EVOLUTION_API_KEY
@@ -98,8 +122,6 @@ export async function POST(request: Request) {
     }
 
     // 1. Criar o grupo real na Evolution GO.
-    // A rota e /group/create (nao /group/createGroup), o campo e groupName
-    // (nao subject) e a chamada exige o token da instancia, nao a chave global.
     const token = await getInstanceToken(instanceName)
     if (!token) {
       return NextResponse.json(
@@ -139,7 +161,7 @@ export async function POST(request: Request) {
     const group = await prisma.group.create({
       data: {
         name,
-        slug,
+        slug: cleanSlug,
         description,
         picture,
         evolutionGroupId: evolutionGroupId || 'ID_PENDENTE_API', 

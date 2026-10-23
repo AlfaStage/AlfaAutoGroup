@@ -2,7 +2,8 @@
  * Motor do Automatizador de Boas-Vindas no Privado (PV).
  *
  * - Suporta regras por Grupo ou por Tag (com heranca automatica e precedencia Grupo > Tag).
- * - Mesmos 4 formatos do agendador: text, media, button, poll.
+ * - Suporta 1 mensagem unica ou multiplos blocos sequenciais (ate 8 blocos por regra),
+ *   onde cada bloco tem seu formato independente: text, media, button, poll.
  * - Blindagem Anti-Ban: delay humanizado (ex.: 45-150s), fila escalonada contra rajadas (+25-45s),
  *   deduplicacao por cooldownDays, protecao de admins/equipe/instancias e instancia remetente opcional.
  * - Modo de Teste Seguro (isTest: true) e suporte automatico a Grupos de Teste (/teste|test/i).
@@ -11,7 +12,56 @@
 const variaveis = require('./variables');
 
 const TEAM_WHITELIST_KEY = 'team_whitelist_phones';
+const MAX_WELCOME_BLOCKS = 8;
+const VALID_WELCOME_TYPES = new Set(['text', 'media', 'button', 'poll']);
 const recentJoinLocks = new Map();
+
+/**
+ * Extrai e normaliza a lista de blocos de mensagem de uma regra de boas-vindas.
+ * - Suporta tanto o formato legado de 1 mensagem ({ text: '...' } / { title: '...' })
+ *   quanto o formato multi-bloco ({ blocks: [{ type, content }, ...] }).
+ * - Limita em ate MAX_WELCOME_BLOCKS (8) blocos por seguranca anti-ban.
+ */
+function extractWelcomeBlocks(defaultType, rawContent) {
+  const fallbackType = VALID_WELCOME_TYPES.has(String(defaultType || ''))
+    ? String(defaultType)
+    : 'text';
+
+  let parsed = rawContent;
+  if (typeof rawContent === 'string') {
+    try {
+      parsed = JSON.parse(rawContent || '{}');
+    } catch {
+      parsed = { text: String(rawContent || '') };
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    parsed = { text: '' };
+  }
+
+  if (Array.isArray(parsed.blocks) && parsed.blocks.length > 0) {
+    const normalized = [];
+    for (const item of parsed.blocks.slice(0, MAX_WELCOME_BLOCKS)) {
+      if (!item || typeof item !== 'object') continue;
+      const bType = VALID_WELCOME_TYPES.has(String(item.type || ''))
+        ? String(item.type)
+        : fallbackType;
+      const bContent =
+        item.content && typeof item.content === 'object' && !Array.isArray(item.content)
+          ? { ...item.content }
+          : { ...item };
+      delete bContent.blocks;
+      normalized.push({ type: bType, content: bContent });
+    }
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  const singleContent = { ...parsed };
+  delete singleContent.blocks;
+  return [{ type: fallbackType, content: singleContent }];
+}
 
 /**
  * Extrai apenas os digitos reais do numero a partir de um telefone ou JID do WhatsApp.
@@ -401,6 +451,81 @@ async function sendEvolutionWelcomeMessage(evolutionUrl, token, recipient, type,
 }
 
 /**
+ * Executa o envio sequencial de 1 ou multiplos blocos de mensagem de boas-vindas.
+ * - Resolve variaveis dinamicas e spintax em cada bloco individualmente.
+ * - Aplica pausa humanizada entre blocos consecutivos (1800ms em teste, 2000-2800ms na fila).
+ */
+async function sendEvolutionWelcomeSequence(
+  evolutionUrl,
+  token,
+  recipient,
+  blocks,
+  ctx,
+  urlAbsolutaDeMidia,
+  options = {}
+) {
+  const list = Array.isArray(blocks) && blocks.length > 0 ? blocks.slice(0, MAX_WELCOME_BLOCKS) : [];
+  if (list.length === 0) {
+    return { ok: false, status: 400, error: 'Nenhum bloco de mensagem configurado para envio.' };
+  }
+
+  const results = [];
+  for (let idx = 0; idx < list.length; idx++) {
+    const block = list[idx];
+    const blockType = VALID_WELCOME_TYPES.has(String(block?.type || '')) ? String(block.type) : 'text';
+    const rawBlockContent = block?.content && typeof block.content === 'object' ? block.content : {};
+    const resolvedBlockContent = variaveis.resolverConteudoAgendamento(blockType, rawBlockContent, ctx);
+
+    const res = await sendEvolutionWelcomeMessage(
+      evolutionUrl,
+      token,
+      recipient,
+      blockType,
+      resolvedBlockContent,
+      urlAbsolutaDeMidia
+    );
+
+    results.push({
+      blockIndex: idx + 1,
+      type: blockType,
+      ok: res.ok,
+      status: res.status,
+      body: res.body,
+      error: res.error,
+      resolvedContent: resolvedBlockContent
+    });
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        status: res.status,
+        body: res.body,
+        error: `Bloco #${idx + 1} (${blockType}): ${res.body || res.error || `HTTP ${res.status}`}`,
+        failedBlockIndex: idx + 1,
+        blocksSent: idx,
+        results,
+        resolvedBlocks: results.map((r) => ({ type: r.type, content: r.resolvedContent })),
+        resolvedContent: results[0]?.resolvedContent || resolvedBlockContent
+      };
+    }
+
+    if (idx < list.length - 1) {
+      const pauseMs = options.isTest ? 1800 : 2000 + Math.floor(Math.random() * 800);
+      await new Promise((r) => setTimeout(r, pauseMs));
+    }
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    blocksSent: list.length,
+    results,
+    resolvedBlocks: results.map((r) => ({ type: r.type, content: r.resolvedContent })),
+    resolvedContent: results[0]?.resolvedContent || {}
+  };
+}
+
+/**
  * Lista todas as instancias cadastradas na Evolution GO com status de conexao e telefone limpo.
  */
 async function listarInstanciasEvolution(evolutionUrl, evolutionKey) {
@@ -555,15 +680,16 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
       memberPhone: item.phone || ''
     });
 
-    const resolvedContent = variaveis.resolverConteudoAgendamento(item.rule.type, rawContent, ctx);
+    const blocks = extractWelcomeBlocks(item.rule.type, rawContent);
 
-    const res = await sendEvolutionWelcomeMessage(
+    const res = await sendEvolutionWelcomeSequence(
       evolutionUrl,
       token,
       item.phone,
-      item.rule.type,
-      resolvedContent,
-      urlAbsolutaDeMidia
+      blocks,
+      ctx,
+      urlAbsolutaDeMidia,
+      { isTest: Boolean(item.isTest) }
     );
 
     if (res.ok) {
@@ -576,7 +702,9 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
           errorMessage: null
         }
       });
-      console.log(`[Welcome] Boas-vindas enviado com sucesso via ${senderInstance} para ${item.phone} (grupo: ${item.group?.name})`);
+      console.log(
+        `[Welcome] Boas-vindas enviado com sucesso (${res.blocksSent} bloco(s)) via ${senderInstance} para ${item.phone} (grupo: ${item.group?.name})`
+      );
     } else {
       const nextAttempt = item.attempts + 1;
       const shouldRetry = nextAttempt < 2 && !item.isTest;
@@ -586,10 +714,10 @@ async function processWelcomeQueue(prisma, instanceTokens, evolutionUrl, urlAbso
           status: shouldRetry ? 'pending' : 'error',
           attempts: nextAttempt,
           ...(shouldRetry ? { scheduledAt: new Date(Date.now() + 120 * 1000) } : {}),
-          errorMessage: `HTTP ${res.status}: ${(res.body || res.error || '').slice(0, 200)}`
+          errorMessage: `HTTP ${res.status}: ${(res.error || res.body || '').slice(0, 200)}`
         }
       });
-      console.error(`[Welcome] Falha ao enviar boas-vindas para ${item.phone}:`, res.status, res.body || res.error);
+      console.error(`[Welcome] Falha ao enviar boas-vindas para ${item.phone}:`, res.status, res.error || res.body);
     }
 
     if (i < pendingList.length - 1) {
@@ -937,6 +1065,8 @@ async function handleWebhookRequest(prisma, NextResponse, request) {
 }
 
 module.exports = {
+  MAX_WELCOME_BLOCKS,
+  extractWelcomeBlocks,
   cleanPhoneDigits,
   isTestGroupName,
   resolveActiveWelcomeRule,
@@ -944,6 +1074,7 @@ module.exports = {
   enqueueWelcomeForJoin,
   formatButtonFallbackText,
   sendEvolutionWelcomeMessage,
+  sendEvolutionWelcomeSequence,
   listarInstanciasEvolution,
   selecionarInstanciaRemetenteConectada,
   processWelcomeQueue,

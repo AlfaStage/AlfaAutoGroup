@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import {
+  MAX_WELCOME_BLOCKS,
+  extractWelcomeBlocks,
   cleanPhoneDigits,
+  isTestGroupName,
   listarInstanciasEvolution,
   selecionarInstanciaRemetenteConectada,
-  sendEvolutionWelcomeMessage
+  sendEvolutionWelcomeSequence
 } from '@shared/welcome'
-import { montarContextoGrupo, resolverConteudoAgendamento } from '@shared/variables'
+import { montarContextoGrupo } from '@shared/variables'
 import { validarChaveApi, chaveDoHeader } from '@/lib/api-keys'
 import { runGroupTask } from '@shared/group-tasks'
 import { aplicarRastreio } from '@/lib/tracked-links'
@@ -925,7 +928,7 @@ const FERRAMENTAS: Ferramenta[] = [
     handler: async (args) => {
       const docsCompletos: Record<string, any> = {
         servidor: 'AlfaAltoGrup MCP Server (JSON-RPC 2.0)',
-        versao: '1.1.0',
+        versao: '1.2.0',
         visaoGeral: 'Servidor MCP HTTP para orquestração autônoma de grupos WhatsApp conectados via Evolution GO.',
         regrasAntiBan: {
           antiBanJitter: 'Mensagens e enquetes para múltiplos grupos recebem automaticamente espaçamento/jitter de até 1 minuto para evitar banimento.',
@@ -975,7 +978,7 @@ const FERRAMENTAS: Ferramenta[] = [
   {
     name: 'welcome_list',
     description:
-      'Lista todas as regras do Automatizador de Boas-Vindas (configuradas por Grupo ou por Tag), status (enabled), estatísticas de envios e últimos disparos da fila.',
+      'Lista todas as regras do Automatizador de Boas-Vindas (configuradas por Grupo ou por Tag), incluindo os blocos de mensagem (blocks), status (enabled), estatísticas de envios e últimos disparos da fila.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1007,24 +1010,30 @@ const FERRAMENTAS: Ferramenta[] = [
       return texto({
         totalRegras: regras.length,
         regrasAtivas: regras.filter(r => r.enabled).length,
-        regras: regras.map(r => ({
-          id: r.id,
-          escopo: r.tagId ? 'tag' : 'group',
-          groupId: r.groupId,
-          grupoNome: r.group?.name || null,
-          tagId: r.tagId,
-          tagNome: r.tag?.name || null,
-          enabled: r.enabled,
-          type: r.type,
-          content: (() => {
+        regras: regras.map(r => {
+          const parsedContent = (() => {
             try { return JSON.parse(r.content) } catch { return { text: r.content } }
-          })(),
-          delayMinSec: r.delayMinSec,
-          delayMaxSec: r.delayMaxSec,
-          cooldownDays: r.cooldownDays,
-          senderInstance: r.senderInstance,
-          totalDispatches: r._count.dispatches
-        })),
+          })()
+          const blocks = extractWelcomeBlocks(r.type, parsedContent)
+          return {
+            id: r.id,
+            escopo: r.tagId ? 'tag' : 'group',
+            groupId: r.groupId,
+            grupoNome: r.group?.name || null,
+            tagId: r.tagId,
+            tagNome: r.tag?.name || null,
+            enabled: r.enabled,
+            type: r.type,
+            blocksCount: blocks.length,
+            blocks,
+            content: parsedContent,
+            delayMinSec: r.delayMinSec,
+            delayMaxSec: r.delayMaxSec,
+            cooldownDays: r.cooldownDays,
+            senderInstance: r.senderInstance,
+            totalDispatches: r._count.dispatches
+          }
+        }),
         filaRecente: fila
       })
     }
@@ -1032,26 +1041,38 @@ const FERRAMENTAS: Ferramenta[] = [
   {
     name: 'welcome_upsert',
     description:
-      'Cria ou atualiza uma regra de Boas-Vindas no Privado para um Grupo (groupId/slug) ou para uma Tag (tagId/tagSlug). Suporta os tipos text, media, button e poll, variáveis dinâmicas ({nome}, {primeiro_nome}, {grupo}, {tag}, {saudacao_emoji}), Spintax e rastreio de links.',
+      'Cria ou atualiza uma regra de Boas-Vindas no Privado para um Grupo (groupId/slug) ou para uma Tag (tagId/tagSlug). Suporta 1 mensagem única (type + content) OU múltiplos blocos sequenciais em "blocks" (até 8 blocos, cada um com seu type: text, media, button ou poll e seu content), variáveis dinâmicas, Spintax e rastreio de links.',
     inputSchema: {
       type: 'object',
       properties: {
         groupId: { type: 'string', description: 'ID ou slug do grupo (exclusivo com tagId)' },
         tagId: { type: 'string', description: 'ID ou slug da Tag (exclusivo com groupId)' },
         enabled: { type: 'boolean', description: 'Se a automação já inicia ativa (padrão false para permitir teste seguro antes)' },
-        type: { type: 'string', enum: ['text', 'media', 'button', 'poll'], description: 'Formato da mensagem de boas-vindas' },
-        content: { type: 'object', description: 'Conteúdo da mensagem (mesmo formato de schedule_create: text, media, button ou poll)' },
+        type: { type: 'string', enum: ['text', 'media', 'button', 'poll'], description: 'Formato quando enviado como bloco único' },
+        content: { type: 'object', description: 'Conteúdo quando enviado como bloco único (text, media, button ou poll)' },
+        blocks: {
+          type: 'array',
+          description: 'Lista de blocos sequenciais de mensagem (1 a 8 blocos). Cada item possui { type, content }.',
+          items: {
+            type: 'object',
+            required: ['type', 'content'],
+            properties: {
+              type: { type: 'string', enum: ['text', 'media', 'button', 'poll'] },
+              content: { type: 'object' }
+            }
+          }
+        },
         trackLinks: { type: 'boolean', description: 'Se true, converte URLs em links curtos rastreáveis /l/xxxxx?grupid=xxxx' },
         delayMinSec: { type: 'number', description: 'Delay mínimo em segundos após entrar no grupo (padrão 45)' },
         delayMaxSec: { type: 'number', description: 'Delay máximo em segundos após entrar no grupo (padrão 150)' },
         cooldownDays: { type: 'number', description: 'Dias sem repetir boas-vindas para o mesmo número (padrão 30)' },
         senderInstance: { type: 'string', description: 'Instância remetente opcional (se omitido, usa a instância do grupo)' }
-      },
-      required: ['type', 'content']
+      }
     },
     async handler(args) {
       let resolvedGroupId: string | null = null
       let resolvedTagId: string | null = null
+      let groupName = ''
 
       if (args.groupId) {
         const g = await prisma.group.findFirst({
@@ -1059,35 +1080,90 @@ const FERRAMENTAS: Ferramenta[] = [
         })
         if (!g) return texto({ erro: `Grupo não encontrado: ${args.groupId}` })
         resolvedGroupId = g.id
+        groupName = g.name
       } else if (args.tagId) {
         const t = await prisma.tag.findFirst({
-          where: { OR: [{ id: String(args.tagId) }, { slug: String(args.tagId) }, { name: String(args.tagId) }] }
+          where: { OR: [{ id: String(args.tagId) }, { slug: String(args.tagId) }, { name: String(args.tagId) }] },
+          include: { groups: { include: { group: { select: { name: true } } } } }
         })
         if (!t) return texto({ erro: `Tag não encontrada: ${args.tagId}` })
         resolvedTagId = t.id
+        const nonTest = t.groups.find(tg => tg.group && !isTestGroupName(tg.group.name))
+        if (args.enabled && nonTest?.group) {
+          return texto({ erro: `Bloqueio de segurança: a Tag contém o grupo final "${nonTest.group.name}". Ative apenas em grupos de teste.` })
+        }
       } else {
         return texto({ erro: 'Informe groupId OU tagId.' })
       }
 
-      const type = String(args.type || 'text')
-      const rawContent = typeof args.content === 'string' ? JSON.parse(args.content) : { ...(args.content || {}) }
-      if (args.trackLinks !== undefined) rawContent.trackLinks = Boolean(args.trackLinks)
+      const enabled = args.enabled !== undefined ? Boolean(args.enabled) : false
+      if (enabled && resolvedGroupId && !isTestGroupName(groupName)) {
+        return texto({ erro: `Bloqueio de segurança: não é permitido ativar regras no grupo final "${groupName}".` })
+      }
 
-      const problema = validateScheduleContent(type as any, rawContent)
-      if (problema) return texto({ erro: problema })
+      const defaultType = String(args.type || 'text')
+      const rawContent =
+        typeof args.content === 'string'
+          ? JSON.parse(args.content || '{}')
+          : { ...(args.content || {}) }
+
+      const trackLinks =
+        args.trackLinks !== undefined
+          ? Boolean(args.trackLinks)
+          : rawContent.trackLinks !== undefined
+            ? Boolean(rawContent.trackLinks)
+            : true
+
+      const candidateBlocks = Array.isArray(args.blocks)
+        ? args.blocks
+        : Array.isArray(rawContent.blocks)
+          ? rawContent.blocks
+          : null
+
+      if (candidateBlocks && candidateBlocks.length > MAX_WELCOME_BLOCKS) {
+        return texto({ erro: `Limite máximo de ${MAX_WELCOME_BLOCKS} blocos por regra.` })
+      }
+
+      const rawBlocks = extractWelcomeBlocks(
+        defaultType,
+        candidateBlocks ? { blocks: candidateBlocks } : rawContent
+      )
 
       const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')
-      const rastreado = await aplicarRastreio(type, rawContent, baseUrl, resolvedGroupId || undefined)
+      const processedBlocks: Array<{ type: string; content: Record<string, any> }> = []
+      let totalLinksCriados = 0
+
+      for (let idx = 0; idx < rawBlocks.length; idx++) {
+        const blk = rawBlocks[idx]
+        const blkType = String(blk.type || defaultType)
+        const blkContent = { ...(blk.content || {}), trackLinks }
+        const problema = validateScheduleContent(blkType as any, blkContent)
+        if (problema) {
+          return texto({ erro: rawBlocks.length > 1 ? `Bloco #${idx + 1}: ${problema}` : problema })
+        }
+        const rastreado = await aplicarRastreio(blkType, blkContent, baseUrl, resolvedGroupId || undefined)
+        totalLinksCriados += rastreado.links.length
+        processedBlocks.push({
+          type: blkType,
+          content: rastreado.content
+        })
+      }
+
+      const primaryBlock = processedBlocks[0]
+      const finalStoredContent = {
+        ...primaryBlock.content,
+        trackLinks,
+        blocks: processedBlocks
+      }
 
       const delayMinSec = Math.max(10, Math.min(3600, Number(args.delayMinSec ?? 45)))
       const delayMaxSec = Math.max(delayMinSec, Math.min(7200, Number(args.delayMaxSec ?? 150)))
       const cooldownDays = Math.max(1, Math.min(365, Number(args.cooldownDays ?? 30)))
-      const enabled = args.enabled !== undefined ? Boolean(args.enabled) : false
       const senderInstance = args.senderInstance ? String(args.senderInstance).trim() : null
 
       const dataPayload = {
-        type,
-        content: JSON.stringify(rastreado.content),
+        type: primaryBlock.type,
+        content: JSON.stringify(finalStoredContent),
         enabled,
         delayMinSec,
         delayMaxSec,
@@ -1107,7 +1183,7 @@ const FERRAMENTAS: Ferramenta[] = [
             create: { tagId: resolvedTagId!, ...dataPayload }
           })
 
-      return texto({ ok: true, rule, linksCriados: rastreado.links.length })
+      return texto({ ok: true, rule, blocksCount: processedBlocks.length, linksCriados: totalLinksCriados })
     }
   },
   {
@@ -1124,20 +1200,36 @@ const FERRAMENTAS: Ferramenta[] = [
       required: ['enabled']
     },
     async handler(args) {
-      let rule = null
+      const includeRel = {
+        group: true,
+        tag: { include: { groups: { include: { group: { select: { name: true } } } } } }
+      }
+      let rule: any = null
       if (args.id) {
-        rule = await prisma.welcomeRule.findUnique({ where: { id: String(args.id) } })
+        rule = await prisma.welcomeRule.findUnique({ where: { id: String(args.id) }, include: includeRel })
       } else if (args.groupId) {
         const g = await prisma.group.findFirst({ where: { OR: [{ id: String(args.groupId) }, { slug: String(args.groupId) }] } })
-        if (g) rule = await prisma.welcomeRule.findUnique({ where: { groupId: g.id } })
+        if (g) rule = await prisma.welcomeRule.findUnique({ where: { groupId: g.id }, include: includeRel })
       } else if (args.tagId) {
         const t = await prisma.tag.findFirst({ where: { OR: [{ id: String(args.tagId) }, { slug: String(args.tagId) }] } })
-        if (t) rule = await prisma.welcomeRule.findUnique({ where: { tagId: t.id } })
+        if (t) rule = await prisma.welcomeRule.findUnique({ where: { tagId: t.id }, include: includeRel })
       }
       if (!rule) return texto({ erro: 'Regra de boas-vindas não encontrada.' })
+
+      const nextEnabled = Boolean(args.enabled)
+      if (nextEnabled) {
+        if (rule.group && !isTestGroupName(rule.group.name)) {
+          return texto({ erro: `Bloqueio de segurança: não é permitido ativar boas-vindas no grupo final "${rule.group.name}".` })
+        }
+        const nonTest = rule.tag?.groups?.find((tg: any) => tg.group && !isTestGroupName(tg.group.name))
+        if (nonTest?.group) {
+          return texto({ erro: `Bloqueio de segurança: a Tag contém o grupo final "${nonTest.group.name}".` })
+        }
+      }
+
       const updated = await prisma.welcomeRule.update({
         where: { id: rule.id },
-        data: { enabled: Boolean(args.enabled) }
+        data: { enabled: nextEnabled }
       })
       return texto({ ok: true, rule: updated })
     }
@@ -1169,7 +1261,7 @@ const FERRAMENTAS: Ferramenta[] = [
   {
     name: 'welcome_test',
     description:
-      'Executa um disparo de TESTE SEGURO de uma regra de Boas-Vindas entre instâncias conectadas (targetInstanceName) ou para um número/grupo de teste (targetPhoneOrJid), sem ativar em grupos finais.',
+      'Executa um disparo de TESTE SEGURO de uma regra de Boas-Vindas (1 ou múltiplos blocos sequenciais) entre instâncias conectadas (targetInstanceName) ou para um número/grupo de teste (targetPhoneOrJid), sem ativar em grupos finais.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1210,7 +1302,7 @@ const FERRAMENTAS: Ferramenta[] = [
         const raw = String(args.targetPhoneOrJid).trim()
         if (raw.endsWith('@g.us')) {
           const tg = await prisma.group.findFirst({ where: { evolutionGroupId: raw } })
-          if (tg && !/teste|test/i.test(tg.name)) {
+          if (tg && !isTestGroupName(tg.name)) {
             return texto({ erro: 'Bloqueio de segurança: não é permitido testar em grupos finais.' })
           }
           recipient = raw
@@ -1234,6 +1326,8 @@ const FERRAMENTAS: Ferramenta[] = [
       } catch {
         rawContent = { text: String(rule.content || '') }
       }
+      const blocks = extractWelcomeBlocks(rule.type, rawContent)
+
       const ctx = await montarContextoGrupo(prisma, sampleGroup, {
         baseUrl,
         tag: rule.tag || undefined,
@@ -1241,15 +1335,15 @@ const FERRAMENTAS: Ferramenta[] = [
         memberName: targetLabel,
         memberPhone: cleanPhoneDigits(recipient) || recipient
       })
-      const resolvedContent = resolverConteudoAgendamento(rule.type, rawContent, ctx)
 
-      const sendRes = await sendEvolutionWelcomeMessage(
+      const sendRes = await sendEvolutionWelcomeSequence(
         apiUrl,
         senderInst.token,
         recipient,
-        rule.type,
-        resolvedContent,
-        (u: string) => (u && !/^https?:\/\//i.test(u) && baseUrl ? `${baseUrl}${u.startsWith('/') ? '' : '/'}${u}` : u)
+        blocks,
+        ctx,
+        (u: string) => (u && !/^https?:\/\//i.test(u) && baseUrl ? `${baseUrl}${u.startsWith('/') ? '' : '/'}${u}` : u),
+        { isTest: true }
       )
 
       const dispatch = await prisma.welcomeDispatch.create({
@@ -1263,12 +1357,20 @@ const FERRAMENTAS: Ferramenta[] = [
           scheduledAt: new Date(),
           sentAt: sendRes.ok ? new Date() : null,
           attempts: 1,
-          errorMessage: sendRes.ok ? null : `HTTP ${sendRes.status}`,
+          errorMessage: sendRes.ok ? null : `HTTP ${sendRes.status}: ${(sendRes.error || '').slice(0, 180)}`,
           isTest: true
         }
       })
 
-      return texto({ ok: sendRes.ok, senderInstance: senderInst.name, recipient, resolvedContent, dispatch })
+      return texto({
+        ok: sendRes.ok,
+        senderInstance: senderInst.name,
+        recipient,
+        blocksSent: sendRes.blocksSent,
+        resolvedBlocks: sendRes.resolvedBlocks,
+        resolvedContent: sendRes.resolvedContent,
+        dispatch
+      })
     }
   },
   {
